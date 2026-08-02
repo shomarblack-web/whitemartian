@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watchtower — Host Console</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="host-page">
+
+<div id="host-toast" class="host-toast" style="display:none"></div>
+
+<div id="hostage-banner" class="hostage-banner" style="display:none">
+  <div id="hostage-banner-text"></div>
+  <div class="hostage-banner-buttons">
+    <button class="btn-primary" style="margin:0" onclick="resolveHostageRelease()">✅ Revealed — Release</button>
+    <button class="btn-ghost" style="margin:0" onclick="resolveHostageConsequence()">❌ Time's Up — Lose 1 HP</button>
+  </div>
+</div>
+
+<div id="inspection-banner" class="hostage-banner" style="display:none">
+  <div id="inspection-banner-text"></div>
+  <div class="hostage-banner-buttons">
+    <button class="btn-primary" style="margin:0" onclick="socket.emit('answer_watchtower', {answer: true})">Yes</button>
+    <button class="btn-ghost" style="margin:0" onclick="socket.emit('answer_watchtower', {answer: false})">No</button>
+  </div>
+</div>
+
+<div id="round-change-banners"></div>
+<div id="good-doctor-banners"></div>
+
+<div id="gameover-banner" class="gameover-banner" style="display:none">
+  <div id="gameover-banner-title"></div>
+  <div id="gameover-banner-message"></div>
+  <button class="btn-primary" style="margin-top:8px" onclick="if(confirm('Start a brand new game?')) socket.emit('new_game')">Start New Game</button>
+</div>
+
+<div class="topbar">
+  <div class="brand">WHITE MARTIAN <span>&reg;</span><small>WATCHTOWER — HOST CONSOLE</small></div>
+  <div style="display:flex; align-items:center; gap:12px">
+    <button class="btn-ghost" style="width:auto;margin:0;padding:8px 14px" title="The opening story script" onclick="openIntro()">Intro</button>
+    <button class="btn-ghost" style="width:auto;margin:0;padding:8px 14px" title="Narration scripts" onclick="openPrompts()">Prompts</button>
+    <button class="btn-ghost" style="width:auto;margin:0;padding:8px 14px" title="Search every character's full card" onclick="openCardopedia()">Cardopedia</button>
+    <button class="btn-ghost" style="width:auto;margin:0;padding:8px 14px" title="Start discussion timer" onclick="openTimer(timerSeconds > 0 ? timerSeconds : 2*60, 'Discuss!')">Discuss! timer</button>
+    <div class="mono" id="conn-status" style="font-size:12px;color:var(--muted)">connecting…</div>
+  </div>
+</div>
+<div class="kirby-divider"></div>
+
+<div class="strip-wrap">
+  <span class="strip-label">Round</span>
+  <div class="led-row" id="round-strip"></div>
+  <span class="strip-label">Phase</span>
+  <div class="led-row" id="phase-strip"></div>
+</div>
+
+<div class="strip-wrap pack-strip-wrap">
+  <span class="strip-label">Card Packs</span>
+  <div class="pack-row" id="pack-row"></div>
+</div>
+
+<div class="panel" id="difficulty-panel" style="display:none">
+  <h3>Difficulty Level</h3>
+  <p style="color:var(--muted); font-size:12px; margin:0 0 10px">
+    One-click suggestions based on your player count and unlocked packs -
+    never required, just a starting point.
+  </p>
+  <div id="difficulty-presets"></div>
+</div>
+
+<div class="layout">
+  <div>
+    <div class="panel">
+      <h3>Roster <button class="btn-ghost" style="width:auto;margin:0;padding:5px 10px;font-size:11px" title="Deactivate every character" onclick="if(confirm('Deactivate every active character?')) socket.emit('clear_all_characters')">Clear All</button></h3>
+      <div id="roster"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel collapsible">
+      <h3><span class="panel-title-wrap">Players</span><span class="panel-chevron">▾</span></h3>
+      <div class="panel-body">
+        <div id="players-list"><div class="empty">Waiting for players to join…</div></div>
+        <div style="display:flex; gap:8px; margin-top:10px">
+          <button class="btn-primary" id="start-btn" title="Lock the roster" onclick="socket.emit('start_game')" style="margin:0">Start</button>
+          <button class="btn-ghost" id="shuffle-btn" title="Randomly assign characters" onclick="doShuffle()" disabled style="margin:0">Shuffle</button>
+        </div>
+        <div id="shuffle-error" class="shuffle-error" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="panel collapsible">
+      <h3><span class="panel-title-wrap">Seating Chart</span><span class="panel-chevron">▾</span></h3>
+      <div class="panel-body">
+        <div id="seating-diagram"></div>
+      </div>
+    </div>
+
+    <div class="panel collapsible">
+      <h3><span class="panel-title-wrap">Vote Tally <span class="mono" id="vote-count" style="color:var(--muted)"></span></span><span class="panel-chevron">▾</span></h3>
+      <div class="panel-body">
+        <div id="tally"><div class="empty">No votes cast this phase.</div></div>
+        <button class="btn-ghost" title="Reset vote tally" onclick="socket.emit('reset_votes')">Clear votes</button>
+      </div>
+    </div>
+
+    <div class="panel collapsible">
+      <h3><span class="panel-title-wrap">Activity</span><span class="panel-chevron">▾</span></h3>
+      <div class="panel-body">
+        <div id="activity"><div class="empty">Nothing yet.</div></div>
+      </div>
+    </div>
+
+    <div class="panel collapsible">
+      <h3><span class="panel-title-wrap">DCEU Map</span><span class="panel-chevron">▾</span></h3>
+      <div class="panel-body">
+        <button class="btn-ghost" title="Open location map" onclick="toggleMap()" id="map-toggle-btn">Open map</button>
+        <button class="btn-ghost" title="Refill all shields" onclick="socket.emit('recharge_shields')">Recharge all shields +1</button>
+      </div>
+    </div>
+
+    <div class="panel collapsible">
+      <h3><span class="panel-title-wrap">New Game</span><span class="panel-chevron">▾</span></h3>
+      <div class="panel-body">
+        <button class="btn-ghost" title="Reset entire game" onclick="openNewGameModal()">New game</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="newgame-overlay" class="map-overlay" onclick="if(event.target===this) closeNewGameModal()">
+  <div class="card-modal">
+    <div class="map-modal-head">
+      <h3 style="margin:0">Start New Game</h3>
+      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeNewGameModal()">Close</button>
+    </div>
+    <div id="newgame-body">
+      <p style="color:var(--muted); font-size:13px; margin-top:0">
+        Remove or add players below — changes apply right away. When you're
+        ready, click "Start New Game" to reset the round, board, and packs
+        while keeping whichever players are listed here.
+      </p>
+      <div id="newgame-player-list"></div>
+      <div class="newgame-add-row">
+        <input type="text" id="newgame-add-input" class="name-input" placeholder="Add a player by name…" style="margin-bottom:0">
+        <button class="btn-ghost" style="width:auto;margin:0" onclick="addPlayerFromModal()">Add</button>
+      </div>
+      <button class="btn-ghost" style="margin-top:10px" onclick="if(confirm('Remove every player from the roster?')) socket.emit('remove_all_players')">Remove All Players</button>
+      <button class="btn-primary" style="margin-top:14px" onclick="confirmStartNewGame()">Start New Game</button>
+    </div>
+  </div>
+</div>
+
+<div id="map-overlay" class="map-overlay">
+  <div class="map-modal">
+    <div class="map-modal-head">
+      <h3 style="margin:0">The DC Universe</h3>
+      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="toggleMap()">Close</button>
+    </div>
+    <div id="map-grid"></div>
+  </div>
+</div>
+
+<div id="card-overlay" class="map-overlay" onclick="if(event.target===this) closeCard()">
+  <div class="card-modal kirby-frame">
+    <div class="kirby-inner">
+      <div class="map-modal-head">
+        <h3 style="margin:0" id="card-name">—</h3>
+        <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeCard()">Close</button>
+      </div>
+      <div id="card-badges" class="mycard-badges"></div>
+      <div id="card-body"></div>
+    </div>
+  </div>
+</div>
+
+<div id="timer-overlay" class="map-overlay">
+  <div class="timer-modal">
+    <div class="map-modal-head">
+      <h3 style="margin:0" id="timer-title">Discuss!</h3>
+      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeTimer()">Close</button>
+    </div>
+    <div class="timer-display mono" id="timer-display">02:00</div>
+    <div class="timer-controls">
+      <button class="btn-ghost" id="timer-toggle-btn" onclick="toggleTimer()">Pause</button>
+      <button class="btn-ghost" onclick="resetTimer()">Reset</button>
+      <button class="btn-ghost" onclick="adjustTimer(60)">+1 min</button>
+    </div>
+  </div>
+</div>
+
+<div id="prompts-overlay" class="map-overlay" onclick="if(event.target===this) closePrompts()">
+  <div class="card-modal">
+    <div class="map-modal-head">
+      <h3 style="margin:0">Prompts — Talk Like a Hero</h3>
+      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closePrompts()">Close</button>
+    </div>
+    <div id="prompts-body"></div>
+  </div>
+</div>
+
+<div id="intro-script-modal-overlay" class="map-overlay" onclick="if(event.target===this) closeIntro()">
+  <div class="card-modal">
+    <div class="map-modal-head">
+      <h3 style="margin:0">Intro Script</h3>
+      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeIntro()">Close</button>
+    </div>
+    <div id="intro-script-body"></div>
+  </div>
+</div>
+
+<div id="cardopedia-overlay" class="map-overlay" onclick="if(event.target===this) closeCardopedia()">
+  <div class="card-modal">
+    <div class="map-modal-head">
+      <h3 style="margin:0">Cardopedia</h3>
+      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeCardopedia()">Close</button>
+    </div>
+    <input type="text" id="cardopedia-search" placeholder="Search for a character…" autocomplete="off"
+           style="width:100%; background:#0d131c; border:1px solid var(--line); border-radius:6px; color:var(--text); padding:10px 12px; font-size:14px; margin-bottom:10px;">
+    <div id="cardopedia-results" class="hostage-target-list"></div>
+    <div id="cardopedia-detail"></div>
+  </div>
+</div>
+
+<div id="hostage-overlay" class="map-overlay" onclick="if(event.target===this) closeHostageModal()">
+  <div class="card-modal hostage-modal">
+    <div class="map-modal-head">
+      <h3 style="margin:0" id="hostage-modal-title">Take Hostage</h3>
+      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeHostageModal()">Close</button>
+    </div>
+    <p style="color:var(--muted); font-size:13px; margin-top:0" id="hostage-modal-desc"></p>
+    <div style="text-align:center; margin-bottom:14px" id="hostage-coin-row">
+      <button class="btn-ghost" style="width:auto" onclick="flipCoin()">🪙 Flip Coin</button>
+      <span id="coin-result" class="mono" style="margin-left:10px; font-weight:700"></span>
+    </div>
+    <div id="hostage-target-list" class="hostage-target-list"></div>
+    <button class="btn-primary" style="margin-top:14px" id="hostage-confirm-btn" onclick="confirmHostage()">Take Hostage</button>
+  </div>
+</div>
+
+<div id="phase-script-overlay" class="map-overlay" onclick="if(event.target===this) closePhaseScript()">
+  <div class="card-modal phase-script-modal">
+    <div class="map-modal-head">
+      <h3 style="margin:0" id="phase-script-title">Phase</h3>
+      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closePhaseScript()">Close</button>
+    </div>
+    <div id="phase-script-lines"></div>
+    <div id="phase-script-timer"></div>
+  </div>
+</div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+  const CHARACTERS = {{ characters | tojson }};
+  const TEAM_LABELS = {{ team_labels | tojson }};
+  const TEAM_COLORS = {{ team_colors | tojson }};
+  const PHASES = {{ phases | tojson }};
+  const NUM_ROUNDS = {{ num_rounds }};
+  const DCEU_GRID = {{ dceu_grid | tojson }};
+  const COLUMN_COLORS = {{ column_colors | tojson }};
+  const CARDS = {{ cards | tojson }};
+  const PROMPTS = {{ prompts | tojson }};
+  const INTRO_SCRIPT = {{ intro_script | tojson }};
+  const PACKS = {{ packs | tojson }};
+</script>
+<script src="/static/host.js"></script>
+</body>
+</html>

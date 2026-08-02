@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crawl Test</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="player-page">
+
+<div id="intro-crawl-overlay" class="intro-crawl-overlay">
+  <div class="crawl-stars"></div>
+  <div class="crawl-buttons">
+    <button class="crawl-skip" onclick="skipIntroCrawl()">Skip Intro</button>
+    <button class="crawl-skip crawl-never" onclick="neverShowIntroCrawl()">Never Show Again</button>
+  </div>
+  <div class="crawl-fade-top"></div>
+  <div class="crawl-viewport">
+    <div class="crawl-text" id="crawl-text">
+      <div class="crawl-title">WHITE MARTIAN</div>
+      <div class="crawl-subtitle">Episode I</div>
+      <div class="crawl-subtitle crawl-subtitle-small">The Watchtower Protocol</div>
+      <p id="crawl-body"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const INTRO_SCRIPT = "White Martians have abducted civilians from Earth including Steve Trevor, Lois Lane, Jimmy Olsen, and even Lex Luthor! Now the Justice League must go undercover as civilian prisoners to rescue their friends and teleport them back to Justice League HQ aka the Watchtower.\n\nBut it's a trap!\n\nThe White Martians mind-wipe the Justice League as soon as they get inside the prison. Now the Justice League don't know their own teammates, or which civilians are their friends and which are White Martians in disguise. Oracle is waiting in the Watchtower for the all-clear to teleport civilians out of the White Martian prison, one by one. Will the Justice League rescue mission be a success, or will the White Martians infiltrate Watchtower and destroy the Earth?\n\nGood Luck, Heroes!";
+  document.getElementById("crawl-body").innerHTML = INTRO_SCRIPT
+    .split("\n\n")
+    .map(para => para.trim())
+    .filter(Boolean)
+    .map(para => `<span class="crawl-para">${para}</span><br><br>`)
+    .join("");
+</script>
+
+</body>
+</html>
