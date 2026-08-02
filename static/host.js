@@ -1552,6 +1552,11 @@ function renderPhaseScriptBody(script) {
   }
 }
 
+function protectorTier(cid) {
+  return PROTECTOR_TIERS[cid] !== undefined ? PROTECTOR_TIERS[cid] : DEFAULT_PROTECTOR_TIER;
+}
+const _CHAR_ORDER = Object.fromEntries(CHARACTERS.map((c, i) => [c.id, i]));
+
 function renderProtectWizard() {
   const linesEl = document.getElementById("phase-script-lines");
   const protectors = (latestState && latestState.eligible_protectors) || [];
@@ -1563,41 +1568,59 @@ function renderProtectWizard() {
 
   const pendingIds = new Set((latestState && latestState.active_protector_cids) || []);
   const respondedIds = new Set((latestState && latestState.protect_responded_cids) || []);
-  const notYetInvited = protectors.filter(p => !pendingIds.has(p.id) && !respondedIds.has(p.id));
-  const pendingList = protectors.filter(p => pendingIds.has(p.id));
-  const startedAlready = respondedIds.size > 0 || pendingIds.size > 0;
 
-  let html = "";
-  if (notYetInvited.length > 0) {
+  // Same tier/roster-order sort the backend uses for its queue, so "next
+  // up" here always matches who Start/Invite Next will actually invite.
+  const sorted = [...protectors].sort((a, b) => {
+    const ta = protectorTier(a.id), tb = protectorTier(b.id);
+    if (ta !== tb) return ta - tb;
+    return (_CHAR_ORDER[a.id] || 0) - (_CHAR_ORDER[b.id] || 0);
+  });
+  const nextUp = sorted.find(p => !pendingIds.has(p.id) && !respondedIds.has(p.id));
+  const pending = sorted.find(p => pendingIds.has(p.id));
+
+  // Group by tier for the status list.
+  const byTier = {};
+  sorted.forEach(p => {
+    const t = protectorTier(p.id);
+    (byTier[t] = byTier[t] || []).push(p);
+  });
+
+  const statusFor = (p) => {
+    if (respondedIds.has(p.id)) return { icon: "✓", cls: "protect-status-done" };
+    if (pendingIds.has(p.id)) return { icon: "⏳", cls: "protect-status-pending" };
+    return { icon: "—", cls: "protect-status-waiting" };
+  };
+
+  let html = `<div class="protect-tier-list">`;
+  Object.keys(byTier).sort((a, b) => a - b).forEach(tier => {
     html += `
-      <div class="phase-script-line">
-        ${protectors.length} character${protectors.length === 1 ? "" : "s"} can shield someone this round
-        (${notYetInvited.map(p => p.name).join(", ")}${startedAlready ? " - not yet invited" : ""}).
+      <div class="protect-tier-group">
+        <div class="protect-tier-label">Tier ${tier}</div>
+        ${byTier[tier].map(p => {
+          const s = statusFor(p);
+          return `<div class="protect-tier-row ${s.cls}"><span class="protect-tier-icon">${s.icon}</span>${p.name}</div>`;
+        }).join("")}
       </div>
-      <button class="btn-primary" style="margin-top:10px" onclick="socket.emit('start_protect_phase')">
-        ${startedAlready ? "Invite Remaining Protectors" : "Start Protect Phase"}
+    `;
+  });
+  html += `</div>`;
+
+  if (pending) {
+    html += `
+      <div class="phase-script-line" style="margin-top:12px; opacity:.85">Waiting for ${pending.name} to silently choose someone to protect&hellip;</div>
+      <div class="protect-pending-actions" style="margin-top:6px">
+        <button class="btn-ghost" style="width:auto;padding:5px 10px;font-size:12px" onclick="socket.emit('resend_protect_prompt', {id: '${pending.id}'})">Resend</button>
+        <button class="btn-ghost" style="width:auto;padding:5px 10px;font-size:12px" onclick="socket.emit('skip_protector', {id: '${pending.id}'})">Skip</button>
+      </div>
+    `;
+  } else if (nextUp) {
+    html += `
+      <button class="btn-primary" style="margin-top:12px" onclick="socket.emit('start_protect_phase')">
+        Invite Next: ${nextUp.name} (Tier ${protectorTier(nextUp.id)})
       </button>
     `;
-  }
-
-  if (pendingList.length > 0) {
-    html += `
-      <div class="phase-script-line" style="margin-top:14px; opacity:.8">Waiting on:</div>
-      <div class="protect-pending-list">
-        ${pendingList.map(p => `
-          <div class="protect-pending-row">
-            <span>${p.name}${p.can_self_protect ? ' <span style="opacity:.6">(may choose self)</span>' : ""}</span>
-            <span class="protect-pending-actions">
-              <button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="socket.emit('resend_protect_prompt', {id: '${p.id}'})">Resend</button>
-              <button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="socket.emit('skip_protector', {id: '${p.id}'})">Skip</button>
-            </span>
-          </div>
-        `).join("")}
-      </div>
-    `;
-  }
-
-  if (notYetInvited.length === 0 && pendingList.length === 0) {
+  } else {
     html += `<div class="phase-script-line" style="opacity:.6; margin-top:10px">All eligible protectors have acted this phase.</div>`;
   }
 

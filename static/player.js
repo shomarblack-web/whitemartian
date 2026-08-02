@@ -227,10 +227,9 @@ function closeInspectAnswer() {
 }
 
 // ---- Protect phase - silently choose who to shield ----
-socket.on("protect_prompt", (data) => {
+function renderProtectCandidates(candidates) {
   const list = document.getElementById("protect-candidate-list");
-  const candidates = data.candidates || [];
-  const items = candidates.length
+  const items = (candidates || []).length
     ? candidates.map(name => {
         const label = name.trim().toLowerCase() === myName.trim().toLowerCase() ? `${name} (yourself)` : name;
         return `<div class="hostage-target" data-name="${name}">${label}</div>`;
@@ -240,6 +239,23 @@ socket.on("protect_prompt", (data) => {
   list.querySelectorAll(".hostage-target").forEach(el => {
     el.addEventListener("click", () => submitProtectTarget(el.dataset.name));
   });
+}
+
+socket.on("protect_prompt", (data) => {
+  document.getElementById("protect-reject-msg").style.display = "none";
+  renderProtectCandidates(data.candidates || []);
+  showOverlay("protect-prompt-overlay");
+});
+
+// A higher-priority protector already claimed your target - pick again.
+// Reopens the same prompt with an error banner and a fresh candidate list;
+// no host action needed.
+socket.on("protect_target_rejected", (data) => {
+  hideOverlay("protect-confirm-overlay");
+  const msg = document.getElementById("protect-reject-msg");
+  msg.textContent = data.message || "That player is already shielded - choose someone else.";
+  msg.style.display = "block";
+  renderProtectCandidates(data.candidates || []);
   showOverlay("protect-prompt-overlay");
 });
 

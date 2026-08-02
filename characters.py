@@ -65,6 +65,30 @@ PROTECTOR_ICONS = {
 }
 DEFAULT_PROTECTOR_ICON = {"bg": "#8a93a1", "glyph": "🛡️", "fg": "#ffffff"}
 
+# Protect-phase priority tiers - lower number acts first. The host invites
+# eligible protectors one at a time in this order (Tier 1 fully resolves
+# before anyone in Tier 2 is invited, etc.). If a target is already
+# shielded by someone in a STRICTLY earlier tier, the current protector is
+# blocked and must pick someone else. If the existing shield came from a
+# same-tier protector, it's informational only - not blocking.
+PROTECTOR_TIERS = {
+    "green_lantern": 1,
+    "plastic_man": 1,
+    "the_flash": 2,
+    "superman": 3,
+    "superboy": 3,
+    "supergirl": 3,
+    "captain_marvel": 3,
+    "mary_batson": 3,
+    "freddie_freeman": 3,
+    "zatanna": 4,
+    "krypto": 4,
+    "streaky": 4,
+    "wonder_girl": 4,
+    "beast_boy": 4,
+}
+DEFAULT_PROTECTOR_TIER = 5  # anyone else (e.g. an ad-hoc Dr. Alchemy Protector)
+
 # "Citizen's arrest" handcuffs toggle - the three law-enforcement civilians
 CUFFS_CHARACTERS = {"james_gordon", "joe_west", "maggie_sawyer"}
 

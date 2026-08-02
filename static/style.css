@@ -595,6 +595,26 @@ body{
   background: var(--panel-raised); font-size: 13px; font-style: normal;
 }
 .protect-pending-actions{ display:flex; gap:6px; }
+
+.protect-tier-list{ display:flex; flex-direction:column; gap:10px; }
+.protect-tier-group{
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  background: var(--panel-raised);
+}
+.protect-tier-label{
+  font-family:'Rajdhani', sans-serif; font-weight:700; font-size:11px;
+  letter-spacing:.08em; text-transform:uppercase; color: var(--amber);
+  margin-bottom: 6px;
+}
+.protect-tier-row{
+  display:flex; align-items:center; gap:8px; font-size: 13px; font-style: normal;
+  padding: 3px 0; color: var(--text);
+}
+.protect-tier-icon{ width: 16px; text-align:center; flex-shrink:0; font-size: 12px; }
+.protect-status-done{ color: var(--muted); }
+.protect-status-done .protect-tier-icon{ color: var(--alive); }
+.protect-status-pending .protect-tier-icon{ color: var(--amber); }
+.protect-status-waiting{ opacity: .65; }
 .intro-text{ white-space: pre-line; line-height: 1.5; }
 .prompt-tag{
   font-family:'Rajdhani',sans-serif; font-size:9px; text-transform:uppercase;

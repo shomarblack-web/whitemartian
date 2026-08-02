@@ -35,7 +35,7 @@ from characters import (
     NARRATION_PROMPTS, INTRO_SCRIPT, PACKS, PACK_LABELS, SWITCH_CHARACTERS,
     HOSTAGE_ABILITIES, KRYPTONIAN_IDS, KNOWS_IDENTITY_OF,
     DIFFICULTY_PRESETS, FAMILIES, HERO_TO_FAMILY, SWITCH_HERO_CIVILIAN_IDS,
-    PROTECTOR_ICONS, DEFAULT_PROTECTOR_ICON,
+    PROTECTOR_ICONS, DEFAULT_PROTECTOR_ICON, PROTECTOR_TIERS, DEFAULT_PROTECTOR_TIER,
 )
 
 CARDS = json.loads((Path(__file__).parent / "cards.json").read_text())
@@ -630,6 +630,36 @@ def eligible_protectors():
             or st.get("alchemy_type") == "protector"
         )
     ]
+
+
+def protect_tier(cid):
+    return PROTECTOR_TIERS.get(cid, DEFAULT_PROTECTOR_TIER)
+
+
+_ROSTER_ORDER = {c["id"]: i for i, c in enumerate(CHARACTERS)}
+
+
+def protect_queue():
+    """Eligible protectors who haven't acted this Protect-phase visit yet,
+    ordered by priority tier (Green Lantern/Plastic Man first, then Flash,
+    then the Super-family, then everyone else) and roster order as a
+    tiebreak within a tier. Index 0 is who the host should invite next."""
+    responded = set(GAME["protect_responded_cids"])
+    protectors = [p for p in eligible_protectors() if p["id"] not in responded]
+    protectors.sort(key=lambda p: (protect_tier(p["id"]), _ROSTER_ORDER.get(p["id"], 999)))
+    return protectors
+
+
+def existing_protector_of(target_cid):
+    """The protector cid currently occupying one of target_cid's protection
+    slots this round, or None if nobody's shielded them yet. Under the new
+    one-target-shielded-once rule, at most one slot is ever actually filled
+    per character per round now."""
+    target_st = GAME["characters"].get(target_cid, {})
+    for slot in target_st.get("protection", []):
+        if slot:
+            return slot
+    return None
 
 
 def apply_shield(target_cid, protector_cid, notify=True):
@@ -1247,6 +1277,8 @@ def host_page():
         packs=PACKS,
         protector_icons=PROTECTOR_ICONS,
         default_protector_icon=DEFAULT_PROTECTOR_ICON,
+        protector_tiers=PROTECTOR_TIERS,
+        default_protector_tier=DEFAULT_PROTECTOR_TIER,
     )
 
 
@@ -3164,9 +3196,9 @@ def on_submit_arrest_target(data):
 
 def _invite_protector(cid):
     """Send this eligible protector's player their private protect_prompt
-    and mark them pending. Shared by start_protect_phase (invites everyone
-    at once) and resend_protect_prompt (re-invite one straggler). Returns
-    True if an invite was actually sent."""
+    and mark them pending. Shared by start_protect_phase (invites the next
+    one in tier order) and resend_protect_prompt (re-send to whoever's
+    currently pending). Returns True if an invite was actually sent."""
     st = GAME["characters"].get(cid)
     char = CHARACTERS_BY_ID.get(cid)
     is_natural_protector = char and char.get("has_shield") and st and st.get("shield") is not None
@@ -3190,26 +3222,25 @@ def _invite_protector(cid):
 
 @socketio.on("start_protect_phase")
 def on_start_protect_phase():
-    """Fully automated Protect phase: one host click invites every eligible,
-    not-yet-responded protector at once - no more inviting them one at a
-    time. Safe to click again later in the same Protect-phase visit; only
-    invites protectors who haven't already acted (or aren't already
-    pending), so newly-eligible characters (e.g. just revealed) can be
-    swept in with a second click."""
+    """Invites the NEXT eligible, not-yet-responded protector in priority-
+    tier order (Green Lantern & Plastic Man first, then Flash, then the
+    Super-family, then everyone else) - one at a time, not all at once.
+    Host clicks this again after each protector resolves to advance to the
+    next one in line. Does nothing if someone is already pending (resolve
+    them first) or if the queue is empty."""
     phase = PHASES[GAME["phase_index"]] if GAME["phase_index"] is not None else None
     if phase != "Protect":
         return
-    invited = []
-    for entry in eligible_protectors():
-        cid = entry["id"]
-        if cid in GAME["protect_responded_cids"] or cid in GAME["active_protector_cids"]:
-            continue
-        if _invite_protector(cid):
-            invited.append(display_name_for(cid))
-    if invited:
-        log_activity(f"Protect phase started - invited {', '.join(invited)} to choose someone to protect")
-    else:
-        log_activity("Protect phase started - no new eligible protectors to invite")
+    if GAME["active_protector_cids"]:
+        return  # someone's already up - resolve them (submit/skip) first
+    queue = protect_queue()
+    if not queue:
+        log_activity("Protect phase - no eligible protectors left to invite")
+        broadcast()
+        return
+    next_cid = queue[0]["id"]
+    if _invite_protector(next_cid):
+        log_activity(f"Invited {display_name_for(next_cid)} (Tier {protect_tier(next_cid)}) to choose someone to protect")
     broadcast()
 
 
@@ -3243,12 +3274,17 @@ def on_skip_protector(data):
 @socketio.on("submit_protect_target")
 def on_submit_protect_target(data):
     """A protector's player privately submits who they want to protect.
-    Fills the first open protection slot for that target via apply_shield,
-    which also spends the protector's shield charge and negates an
-    in-progress Eliminated status (ELM -> Shielded). If the target's
-    protection is already full this round, the protector is never told -
-    only the host sees a notification, per the game's silent-protector
-    design."""
+
+    Tier conflict rules (a character can only ever be shielded once per
+    round now): if the target is already shielded by someone from a
+    STRICTLY higher-priority tier (they necessarily went earlier, since
+    the queue is invited in tier order), this protector is blocked and
+    stays pending - they're told to pick someone else, and get their
+    candidate list back immediately without waiting on the host. If the
+    target is already shielded by a SAME-tier protector (e.g. Green
+    Lantern then Plastic Man both pick the same person), it's purely
+    informational - not blocking - and this submission still counts as
+    their turn."""
     protector_name = (data.get("protector") or "").strip()
     target_name = (data.get("target_name") or "").strip()
     if not protector_name or not target_name:
@@ -3259,18 +3295,48 @@ def on_submit_protect_target(data):
     target_cid = find_player_character_id(target_name)
     if not target_cid or not GAME["characters"][target_cid]["active"]:
         return
+
+    protector_display = display_name_for(protector_cid)
+    target_display = display_name_for(target_cid)
+    existing_cid = existing_protector_of(target_cid)
+
+    if existing_cid and existing_cid != protector_cid:
+        existing_name = display_name_for(existing_cid)
+        if protect_tier(existing_cid) < protect_tier(protector_cid):
+            # Strictly higher priority already claimed this target - blocked.
+            # Stays pending; player gets an immediate re-pick, no host step needed.
+            sid = _sid_for_player(protector_name)
+            if sid:
+                socketio.emit("protect_target_rejected", {
+                    "message": f"{target_display} is already shielded by {existing_name}. Choose someone else.",
+                    "candidates": active_player_names(exclude_name=None if can_self_protect(protector_cid) else protector_name),
+                    "can_self_protect": can_self_protect(protector_cid),
+                }, room=sid)
+            log_activity(f"{protector_display} tried to shield {target_display}, but {existing_name} "
+                         f"(higher priority) already did - asked to pick someone else")
+            broadcast()
+            return
+        else:
+            # Same tier - informational only, doesn't block. Turn is used.
+            GAME["active_protector_cids"].remove(protector_cid)
+            if protector_cid not in GAME["protect_responded_cids"]:
+                GAME["protect_responded_cids"].append(protector_cid)
+            sid = _sid_for_player(protector_name)
+            if sid:
+                socketio.emit("condition_alert", {
+                    "title": "Already Protected",
+                    "body": f"{existing_name} already shielded {target_display} this round - "
+                            f"no action needed from you.",
+                }, room=sid)
+            log_activity(f"{protector_display} picked {target_display}, but {existing_name} (same tier) "
+                         f"already shielded them - informational only")
+            broadcast()
+            return
+
     GAME["active_protector_cids"].remove(protector_cid)
     if protector_cid not in GAME["protect_responded_cids"]:
         GAME["protect_responded_cids"].append(protector_cid)
-    protector_display = display_name_for(protector_cid)
-    target_display = display_name_for(target_cid)
-    if not apply_shield(target_cid, protector_cid):
-        socketio.emit("character_limit_error", {
-            "message": f"{protector_display} tried to protect {target_display}, but "
-                       f"their protection is already full this round. {protector_display}'s "
-                       f"player was not told this failed."
-        }, room="hosts")
-        log_activity(f"{protector_display} tried to protect {target_display} - already full")
+    apply_shield(target_cid, protector_cid)
     broadcast()
 
 
