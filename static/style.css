@@ -409,6 +409,7 @@ body{
 .condition-rescued{ color: var(--alive); border: 1px solid var(--alive); background: rgba(79,201,126,.10); }
 .condition-targeted{ color: #ff8a5c; border: 1px solid #ff8a5c; background: rgba(255,138,92,.10); }
 .condition-arrested{ color: #e5484d; border: 1px solid #e5484d; background: rgba(229,72,77,.12); }
+.condition-shielded{ color: #2dd4ff; border: 1px solid #2dd4ff; background: rgba(45,212,255,.10); }
 .hostage-modal{ max-width: 440px; }
 .hostage-target-list{ display:flex; flex-direction:column; gap:6px; max-height: 260px; overflow-y:auto; }
 .hostage-target{
@@ -453,12 +454,20 @@ body{
 }
 .prot-row{ display:flex; gap:4px; }
 .prot-dot{
-  width:15px; height:15px; border-radius:50%;
+  width:19px; height:19px; border-radius:50%;
   border: 2.5px solid var(--muted);
   cursor:pointer; background:transparent;
   box-sizing: border-box;
+  display:flex; align-items:center; justify-content:center;
+  font-size: 11px; line-height:1; font-weight:800;
+  font-family:'Rajdhani', sans-serif;
+  transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
 }
+/* Fallback (protector badge not resolved yet) - matches the old generic look */
 .prot-dot.on{ background: var(--amber); border-color: var(--amber); box-shadow: 0 0 6px rgba(245,166,35,.6); }
+/* When a protector badge is applied inline (background/color set via JS),
+   still show a matching soft glow so a filled dot reads clearly at a glance. */
+.prot-dot.on[style*="background"]{ box-shadow: 0 0 6px rgba(255,255,255,.35); border-color: transparent; }
 
 /* ---------- steppers (health / shield) ---------- */
 .stepper{
@@ -579,6 +588,13 @@ body{
 }
 .step-nav-buttons{ display: flex; gap: 8px; }
 .step-nav-buttons button:disabled{ opacity: .3; cursor: not-allowed; }
+.protect-pending-list{ display:flex; flex-direction:column; gap:6px; }
+.protect-pending-row{
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel-raised); font-size: 13px; font-style: normal;
+}
+.protect-pending-actions{ display:flex; gap:6px; }
 .intro-text{ white-space: pre-line; line-height: 1.5; }
 .prompt-tag{
   font-family:'Rajdhani',sans-serif; font-size:9px; text-transform:uppercase;

@@ -35,6 +35,7 @@
     "role": "TYPE - Hero, Protector",
     "abilities": [
       "PASSIVE ABILITY. Run for Your Life. Player must be targeted twice for elimination.",
+      "ACTIVE ABILITY. Speed Shield. Player may shield one player from elimination. (Protect!)",
       "ACTIVE ABILITY. Fastest Man Alive. Target one player. Player switches seats with target. (Protect!)",
       "SUPER ABILITY. Altering the Timeline. Player may cancel results of previous Vote! Phase, and initiate new Vote! Phase. (Rescue!)"
     ],
@@ -45,7 +46,7 @@
     "role": "TYPE - Hero, Protector",
     "abilities": [
       "PASSIVE ABILITY. Force Field. Green Lantern must be targeted twice for elimination.",
-      "PASSIVE ABILITY. Green Lantern\u2019s Light. Each target beside player is shielded until player is moved/eliminated.",
+      "ACTIVE ABILITY. Green Lantern\u2019s Light. Player may shield one player from elimination. (Protect!)",
       "ACTIVE ABILITY. Flight. Targets one player. Player and target are immediately Rescued (MOGO). (Rescue!)",
       "SUPER ABILITY. Construct. Player may create one new rule that all players must follow until end of game. (Discuss!)"
     ],
@@ -141,7 +142,7 @@
     "abilities": [
       "PASSIVE ABILITY. Malleable Mind. Player cannot be eliminated (White Martians).",
       "ACTIVE ABILITY. Master of Disguise. Player cannot be targeted this round.",
-      "ACTIVE ABILITY. Group Hug. Player may shield two players to the left or to the right.",
+      "ACTIVE ABILITY. Group Hug. Player may shield one player from elimination. (Protect!)",
       "SUPER ABILITY. Petty Thief. Player may look at Secret Identity roster (10s)."
     ],
     "strategy": "STRATEGY: Protect Civilians."
@@ -788,7 +789,7 @@
     "signal": "SIGNAL - 'S' on chest",
     "role": "TYPE - Hero, Sidekick, Protector",
     "abilities": [
-      "PASSIVE ABILITY. The Family Business. Player may shield one player.",
+      "PASSIVE ABILITY. The Family Business. Player may shield one player. (Protect!)",
       "PASSIVE ABILITY. Under A Yellow Sun. Player must be targeted thrice for elimination.",
       "ACTIVE ABILITY. Look, Up in the Sky... Player may lie for Superman. (Accuse!)",
       "SUPER ABILITY. Up Up and Away! Target one player. Player and target are rescued (Fortress of Solitude). (Rescue!)"
@@ -799,7 +800,7 @@
     "signal": "SIGNAL - 'S' on chest",
     "role": "TYPE - Hero, Sidekick, Protector",
     "abilities": [
-      "PASSIVE ABILITY. The Family Business. Player may shield one player.",
+      "PASSIVE ABILITY. The Family Business. Player may shield one player. (Protect!)",
       "PASSIVE ABILITY. Under A Yellow Sun. Player must be targeted thrice for elimination.",
       "ACTIVE ABILITY. Look, Up in the Sky... Player may lie for Superman. (Accuse!)",
       "SUPER ABILITY. Up Up and Away! Target one player. Player and target are rescued (Fortress of Solitude). (Rescue!)"

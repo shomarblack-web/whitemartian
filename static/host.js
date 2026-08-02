@@ -184,15 +184,12 @@ function renderSeatingDiagram(state) {
   }
   const size = 260, cx = size / 2, cy = size / 2, radius = 95, seatR = 22;
   const n = seats.length;
-  const glNeighbors = new Set((state.green_lantern_neighbors || []).map(n => n.toLowerCase()));
   const seatEls = seats.map((name, i) => {
     const angle = (2 * Math.PI * i) / n - Math.PI / 2;
     const x = cx + radius * Math.cos(angle);
     const y = cy + radius * Math.sin(angle);
-    const isGlShielded = glNeighbors.has((name || "").toLowerCase());
-    const stroke = isGlShielded ? "#2dd4ff" : "#f5b942";
     return `
-      <circle cx="${x}" cy="${y}" r="${seatR}" fill="#1b2330" stroke="${stroke}" stroke-width="${isGlShielded ? 3 : 2}"/>
+      <circle cx="${x}" cy="${y}" r="${seatR}" fill="#1b2330" stroke="#f5b942" stroke-width="2"/>
       <text x="${x}" y="${y + 5}" text-anchor="middle" font-family="Rajdhani, sans-serif"
             font-weight="700" font-size="15" fill="#e8edf2">${seatInitials(name)}</text>
     `;
@@ -503,15 +500,6 @@ function buildCharRow(c) {
     controls.appendChild(mapBtn);
   }
 
-  if (c.id === "plastic_man") {
-    const groupHugBtn = document.createElement("button");
-    groupHugBtn.className = "action-btn reveal-btn";
-    groupHugBtn.title = "Let Plastic Man choose Left or Right to silently shield two players";
-    groupHugBtn.textContent = "Send Group Hug Prompt";
-    groupHugBtn.onclick = () => socket.emit("send_plastic_man_prompt", { id: c.id });
-    controls.appendChild(groupHugBtn);
-  }
-
   if (c.id === "beast_boy") {
     const giraffeBtn = document.createElement("button");
     giraffeBtn.className = "action-btn reveal-btn";
@@ -785,6 +773,25 @@ socket.on("state", (state) => {
       }
     });
 
+    // Shielded isn't tied to an action button like the others above - it's
+    // set automatically by apply_shield() (Protect phase, Green Lantern,
+    // Plastic Man) and clears when protection dots reset or get manually
+    // cleared. If it just negated an Eliminated status, the ☠️ badge above
+    // has already been removed this same render since st.eliminated is now
+    // false, so this reads as ELIMINATED -> SHIELDED.
+    let shieldedBadge = row.querySelector(".condition-badge.condition-shielded");
+    if (st.shielded) {
+      if (!shieldedBadge) {
+        shieldedBadge = document.createElement("span");
+        shieldedBadge.className = "condition-badge condition-shielded";
+        shieldedBadge.title = "Protected this round - clears when protection resets next Protect phase";
+        shieldedBadge.textContent = "🛡️ Shielded";
+        row.querySelector(".char-name").appendChild(shieldedBadge);
+      }
+    } else if (shieldedBadge) {
+      shieldedBadge.remove();
+    }
+
     const isArrested = st.arrested_scope && st.arrested_for_round === state.round;
     let arrestBadge = row.querySelector(".condition-badge.condition-arrested");
     if (isArrested) {
@@ -825,7 +832,26 @@ socket.on("state", (state) => {
       b.classList.toggle("sel", !!st[b.dataset.field]);
     });
 
-    row.querySelectorAll(".prot-dot").forEach(d => d.classList.toggle("on", st.protection[d.dataset.slot]));
+    row.querySelectorAll(".prot-dot").forEach(d => {
+      const protectorCid = st.protection[d.dataset.slot];
+      d.classList.toggle("on", !!protectorCid);
+      if (protectorCid) {
+        const icon = PROTECTOR_ICONS[protectorCid] || DEFAULT_PROTECTOR_ICON;
+        const protectorSt = state.characters[protectorCid];
+        const protectorName = (protectorSt && protectorSt.display_name) || protectorCid;
+        d.style.background = icon.bg;
+        d.style.color = icon.fg;
+        d.style.borderColor = "transparent";
+        d.textContent = icon.glyph;
+        d.title = `Shielded by ${protectorName} - click to clear`;
+      } else {
+        d.style.background = "";
+        d.style.color = "";
+        d.style.borderColor = "";
+        d.textContent = "";
+        d.title = TOOLTIPS.protDot;
+      }
+    });
     row.querySelectorAll(".action-btn:not(.special-btn)").forEach(b => b.classList.toggle("sel", st.last_action === b.dataset.action));
   });
 
@@ -1480,7 +1506,6 @@ let lastStepsPhase = null;
 let stepIndex = 0;
 let inspectStepIndex = 0;
 let lastInspectPhase = null;
-let protectStepIndex = 0;
 let lastProtectPhase = null;
 
 function renderPhaseScriptBody(script) {
@@ -1497,10 +1522,7 @@ function renderPhaseScriptBody(script) {
     renderInspectWizard();
   } else if (script.kind === "interactive" && script.phase === "Protect") {
     lastInspectPhase = null;
-    if (script.phase !== lastProtectPhase) {
-      lastProtectPhase = script.phase;
-      protectStepIndex = 0;
-    }
+    lastProtectPhase = script.phase;
     renderProtectWizard();
   } else if (script.kind === "steps" && script.lines.length > 1) {
     lastInspectPhase = null;
@@ -1538,42 +1560,48 @@ function renderProtectWizard() {
     linesEl.innerHTML = `<div class="phase-script-line" style="opacity:.6">No active character currently has a Protect/Shield ability.</div>`;
     return;
   }
-  if (protectStepIndex >= protectors.length) protectStepIndex = protectors.length - 1;
-  const current = protectors[protectStepIndex];
-  const isFirst = protectStepIndex === 0;
-  const isLast = protectStepIndex >= protectors.length - 1;
-  const invitedId = latestState.active_protector_cid;
-  const currentIsInvited = invitedId === current.id;
 
-  let bodyHtml;
-  if (currentIsInvited) {
-    bodyHtml = `<div class="phase-script-line" style="opacity:.8">Waiting for ${current.name} to silently choose someone to protect&hellip;</div>`;
-  } else {
-    const selfNote = current.can_self_protect
-      ? " (may choose themselves)"
-      : "";
-    bodyHtml = `
-      <div class="phase-script-line">${current.name} may choose one player to shield this round${selfNote}.</div>
-      <button class="btn-primary" style="margin-top:10px" onclick="socket.emit('send_protect_prompt', {id: '${current.id}'})">Send Protect Prompt</button>
+  const pendingIds = new Set((latestState && latestState.active_protector_cids) || []);
+  const respondedIds = new Set((latestState && latestState.protect_responded_cids) || []);
+  const notYetInvited = protectors.filter(p => !pendingIds.has(p.id) && !respondedIds.has(p.id));
+  const pendingList = protectors.filter(p => pendingIds.has(p.id));
+  const startedAlready = respondedIds.size > 0 || pendingIds.size > 0;
+
+  let html = "";
+  if (notYetInvited.length > 0) {
+    html += `
+      <div class="phase-script-line">
+        ${protectors.length} character${protectors.length === 1 ? "" : "s"} can shield someone this round
+        (${notYetInvited.map(p => p.name).join(", ")}${startedAlready ? " - not yet invited" : ""}).
+      </div>
+      <button class="btn-primary" style="margin-top:10px" onclick="socket.emit('start_protect_phase')">
+        ${startedAlready ? "Invite Remaining Protectors" : "Start Protect Phase"}
+      </button>
     `;
   }
 
-  linesEl.innerHTML = `
-    ${bodyHtml}
-    <div class="step-nav">
-      <span class="step-nav-count">${protectStepIndex + 1} of ${protectors.length}</span>
-      <div class="step-nav-buttons">
-        <button class="btn-ghost" style="width:auto" onclick="stepProtect(-1)" ${isFirst ? "disabled" : ""}>&larr; Back</button>
-        <button class="btn-ghost" style="width:auto" onclick="stepProtect(1)" ${isLast ? "disabled" : ""}>Next &rarr;</button>
+  if (pendingList.length > 0) {
+    html += `
+      <div class="phase-script-line" style="margin-top:14px; opacity:.8">Waiting on:</div>
+      <div class="protect-pending-list">
+        ${pendingList.map(p => `
+          <div class="protect-pending-row">
+            <span>${p.name}${p.can_self_protect ? ' <span style="opacity:.6">(may choose self)</span>' : ""}</span>
+            <span class="protect-pending-actions">
+              <button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="socket.emit('resend_protect_prompt', {id: '${p.id}'})">Resend</button>
+              <button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="socket.emit('skip_protector', {id: '${p.id}'})">Skip</button>
+            </span>
+          </div>
+        `).join("")}
       </div>
-    </div>
-  `;
-}
+    `;
+  }
 
-function stepProtect(delta) {
-  const protectors = (latestState && latestState.eligible_protectors) || [];
-  protectStepIndex = Math.max(0, Math.min(protectors.length - 1, protectStepIndex + delta));
-  renderProtectWizard();
+  if (notYetInvited.length === 0 && pendingList.length === 0) {
+    html += `<div class="phase-script-line" style="opacity:.6; margin-top:10px">All eligible protectors have acted this phase.</div>`;
+  }
+
+  linesEl.innerHTML = html;
 }
 
 function renderInspectWizard() {
