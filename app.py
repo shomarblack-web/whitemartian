@@ -186,6 +186,10 @@ GAME = {
     "pending_inspection": None,
     "lobo_tracker": {"civilian": 0, "hero": 0, "martian": 0},
     "active_inspector_cid": None,
+    # Every Inspect-ability character who has already been invited to ask
+    # Watchtower a question this Inspect phase - prevents the host from
+    # re-sending the prompt to the same character more than once per phase.
+    "inspect_responded_cids": [],
     # Batch Protect-phase automation: everyone currently invited-and-still-
     # deciding (pending) vs. everyone who's already acted or been skipped
     # this Protect-phase visit (responded), so "Start Protect Phase" is
@@ -467,10 +471,12 @@ def vote_candidates():
     the pool of people who can be voted for. Deliberately just names, with
     no character id attached, so the payload can't be used to reconstruct
     who's playing whom even by someone inspecting raw network traffic.
+    Rescued players are excluded - once in Watchtower they can no longer
+    be targeted for elimination or teleportation, per their card text.
     """
     return [
         st["player_name"] for st in GAME["characters"].values()
-        if st["active"] and st.get("player_name")
+        if st["active"] and st.get("player_name") and not st.get("rescued")
     ]
 
 
@@ -505,10 +511,11 @@ def active_kryptonian_count(exclude_cid=None):
 def eliminate_candidates():
     """Real names of active, non-Martian players - the pool White Martians
     (and anyone Dr. Alchemy made an Eliminator) vote on to eliminate.
-    Eliminators don't vote each other off, same as Martians."""
+    Eliminators don't vote each other off, same as Martians. Rescued
+    players are excluded - safe in Watchtower, can't be targeted."""
     return [
         st["player_name"] for cid, st in GAME["characters"].items()
-        if st["active"] and st.get("player_name")
+        if st["active"] and st.get("player_name") and not st.get("rescued")
         and CHARACTERS_BY_ID.get(cid, {}).get("team") != "martian"
         and st.get("alchemy_type") != "eliminator"
     ]
@@ -950,6 +957,7 @@ def public_state(reveal_names):
         state["votes"] = GAME["votes"]
         state["pending_inspection"] = GAME["pending_inspection"]
         state["active_inspector_cid"] = GAME["active_inspector_cid"]
+        state["inspect_responded_cids"] = GAME["inspect_responded_cids"]
         state["eligible_inspectors"] = eligible_inspectors()
         state["active_protector_cids"] = GAME["active_protector_cids"]
         state["protect_responded_cids"] = GAME["protect_responded_cids"]
@@ -1384,21 +1392,6 @@ def on_set_round(data):
             if superman_st.get("shield") is not None:
                 superman_st["shield"] = min(MAX_HEALTH, superman_st["shield"])
 
-    if new_round >= 3 and not GAME["super_abilities_announced"]:
-        GAME["super_abilities_announced"] = True
-        log_activity("Super Abilities are now active!")
-        for cid in super_active_characters():
-            ability = real_super_ability(cid)
-            pname = (GAME["characters"][cid].get("player_name") or "").strip().lower()
-            if not pname:
-                continue
-            for sid, name in PLAYER_SIDS.items():
-                if name.strip().lower() == pname:
-                    socketio.emit("super_ability_unlocked", {
-                        "character": display_name_for(cid),
-                        "ability": ability,
-                    }, room=sid)
-
     broadcast()
 
 
@@ -1423,12 +1416,28 @@ def _set_phase_by_index(idx, error_sid=None):
     if old_phase == "Inspect" and (idx is None or PHASES[idx] != "Inspect"):
         GAME["pending_inspection"] = None
         GAME["active_inspector_cid"] = None
+        GAME["inspect_responded_cids"] = []
         GAME["active_alchemist_cid"] = None
         GAME["pending_alchemy"] = None
         if GAME["active_arrester_cid"] and ARREST_INFO.get(GAME["active_arrester_cid"], {}).get("phase") == "Inspect":
             GAME["active_arrester_cid"] = None
         GAME["active_telepathy_cid"] = None
     if old_phase == "Protect" and (idx is None or PHASES[idx] != "Protect"):
+        # The Protect window has just closed - anyone still Eliminated at
+        # this point never got shielded this round (apply_shield already
+        # clears "eliminated" the moment a shield lands on them), so they
+        # automatically lose 1 health, floored at 0.
+        for cid, st in GAME["characters"].items():
+            if st["active"] and st.get("eliminated") and st.get("health") is not None:
+                old_health = st["health"]
+                st["health"] = max(0, st["health"] - 1)
+                if st["health"] < old_health:
+                    log_activity(f"{display_name_for(cid)} was Eliminated and not shielded - "
+                                 f"lost 1 health ({st['health']} remaining)")
+                    pname = (st.get("player_name") or "").strip()
+                    sid = _sid_for_player(pname) if pname else None
+                    if sid:
+                        socketio.emit("hp_lost", {"new_health": st["health"]}, room=sid)
         GAME["active_protector_cids"] = []
         GAME["protect_responded_cids"] = []
     if old_phase == "Accuse" and (idx is None or PHASES[idx] != "Accuse"):
@@ -1446,6 +1455,20 @@ def _set_phase_by_index(idx, error_sid=None):
                 st["shielded"] = False
             GAME["active_protector_cids"] = []
             GAME["protect_responded_cids"] = []
+        if PHASES[idx] == "Report" and GAME["round"] >= 3 and not GAME["super_abilities_announced"]:
+            GAME["super_abilities_announced"] = True
+            log_activity("Super Abilities are now active!")
+            for cid in super_active_characters():
+                ability = real_super_ability(cid)
+                pname = (GAME["characters"][cid].get("player_name") or "").strip().lower()
+                if not pname:
+                    continue
+                for sid, name in PLAYER_SIDS.items():
+                    if name.strip().lower() == pname:
+                        socketio.emit("super_ability_unlocked", {
+                            "character": display_name_for(cid),
+                            "ability": ability,
+                        }, room=sid)
     broadcast()
     push_phase_reminders()
     push_phase_guide()
@@ -1978,7 +2001,6 @@ def on_character_action(data):
             st[cond["flag"]] = False
         log_activity(f"{name} deactivated")
     else:
-        st["last_action"] = action
         log_activity(f"{name}: {action.capitalize()}")
         # Track outcomes for next round's Report recap. "watchtower" =
         # reached Watchtower safely; "end" = eliminated/game over.
@@ -1986,16 +2008,25 @@ def on_character_action(data):
             GAME["round_events"]["rescued"].append(cid)
         if action == "end" and cid not in GAME["round_events"]["eliminated"]:
             GAME["round_events"]["eliminated"].append(cid)
-        # Condition toggle + private player alert, only on turning ON.
         if action in CONDITIONS:
+            # Condition-backed buttons (ELM, Expose, Watchtower, Teleport)
+            # are real on/off toggles - the button's highlight (last_action)
+            # follows the flag itself, so clicking an already-highlighted
+            # button turns it back off instead of re-lighting it forever.
             cond = CONDITIONS[action]
             st[cond["flag"]] = not st[cond["flag"]]
             if st[cond["flag"]]:
+                st["last_action"] = action
                 push_condition_alert(cid, cond["title"], cond["body"])
                 if action == "end":
                     check_spectre_transformation(cid)
                 if action == "expose":
                     announce_gadfly_exposure(cid)
+            elif st["last_action"] == action:
+                st["last_action"] = None
+        else:
+            # Non-condition actions (e.g. Hive) - simple, always-on click.
+            st["last_action"] = action
         if action == "end":
             check_house_of_el_condition()
     broadcast()
@@ -2609,7 +2640,12 @@ def on_send_inspect_prompt(data):
         return
     if not _visible_phase_abilities(cid, "Inspect"):
         return  # e.g. Superman's X-Ray Vision is a locked Super Ability before Round 3
+    if cid in GAME["inspect_responded_cids"]:
+        return  # already invited to ask Watchtower this phase - only once per phase
+    if GAME["active_inspector_cid"] is not None:
+        return  # someone else is already mid-question - only one live invite at a time
     GAME["active_inspector_cid"] = cid
+    GAME["inspect_responded_cids"].append(cid)
     GAME["pending_inspection"] = None
     pname = (st.get("player_name") or "").strip()
     sid = _sid_for_player(pname) if pname else None
@@ -3448,6 +3484,7 @@ def on_new_game():
     GAME["game_over"] = None
     GAME["pending_inspection"] = None
     GAME["active_inspector_cid"] = None
+    GAME["inspect_responded_cids"] = []
     GAME["active_protector_cids"] = []
     GAME["protect_responded_cids"] = []
     GAME["lobo_tracker"] = {"civilian": 0, "hero": 0, "martian": 0}

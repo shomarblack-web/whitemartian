@@ -558,6 +558,24 @@ body{
 }
 .ability-title{ font-weight:700; font-size:14px; margin: 1px 0 2px; }
 .ability-desc{ font-size:13px; color: var(--text); opacity:.85; line-height:1.4; }
+.goals-list{ margin: 12px 0 0; padding-left: 20px; font-size:13px; color: var(--text); opacity:.9; line-height:1.6; }
+.goals-list li{ margin-bottom: 8px; }
+.alerts-badge{
+  position: absolute; top: -6px; right: -6px;
+  background: var(--amber, #f5b942); color: #1a1305;
+  font-size: 11px; font-weight: 800; line-height: 1;
+  min-width: 16px; height: 16px; padding: 2px 4px;
+  border-radius: 999px; text-align: center;
+}
+.alert-log-item{
+  padding: 10px 12px; margin-bottom: 8px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px; cursor: pointer; transition: background .15s ease;
+}
+.alert-log-item:hover{ background: rgba(255,255,255,.09); }
+.alert-log-time{ font-size:11px; color: var(--muted); margin-bottom: 2px; }
+.alert-log-title{ font-size:14px; font-weight:700; color: var(--text); }
+.alert-log-sub{ font-size:12px; color: var(--text); opacity:.8; margin-top:2px; }
 .type-tag{
   display:inline-flex; align-items:center; justify-content:center;
   width:16px; height:16px; border-radius:4px; font-size:10px; font-weight:800;

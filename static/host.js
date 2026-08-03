@@ -1642,8 +1642,11 @@ function renderInspectWizard() {
 
   const pending = latestState.pending_inspection;
   const invitedId = latestState.active_inspector_cid;
+  const respondedIds = latestState.inspect_responded_cids || [];
   const currentCharState = latestState.characters[current.id];
   const currentIsInvited = invitedId === current.id;
+  const currentAlreadyAsked = respondedIds.includes(current.id) && !currentIsInvited;
+  const someoneElseInvited = invitedId !== null && invitedId !== undefined && !currentIsInvited;
 
   let bodyHtml;
   if (currentIsInvited && pending) {
@@ -1664,6 +1667,10 @@ function renderInspectWizard() {
     `;
   } else if (currentIsInvited) {
     bodyHtml = `<div class="phase-script-line" style="opacity:.8">Waiting for ${current.name} to silently pick someone to inspect&hellip;</div>`;
+  } else if (currentAlreadyAsked) {
+    bodyHtml = `<div class="phase-script-line" style="opacity:.6">${current.name} has already asked Watchtower a question this phase.</div>`;
+  } else if (someoneElseInvited) {
+    bodyHtml = `<div class="phase-script-line" style="opacity:.6">Another character is currently mid-question - finish that one first.</div>`;
   } else {
     bodyHtml = `
       <div class="phase-script-line">${current.name} may silently ask Watchtower if another player is a White Martian.</div>
