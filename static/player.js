@@ -582,16 +582,58 @@ function cancelTelepathicLinkTarget() {
   if (pendingTelepathicPromptData) showTelepathicLinkPrompt(pendingTelepathicPromptData);
 }
 
+// ---- Alert chime - synthesized with Web Audio, no sound file needed. ----
+// iOS Safari never implemented navigator.vibrate(), so on an iPhone the
+// vibrate calls below are silent no-ops - this chime is what actually gets
+// a player's attention there. Web Audio on iOS requires the AudioContext to
+// be created/resumed from a real user gesture at least once per page load,
+// so we lazily "unlock" it on the player's very first tap/touch (they'll
+// have tapped plenty of buttons - Join, Accept, etc. - well before any
+// Telepathic Link/Team alert can possibly fire), then just reuse it.
+let audioCtx = null;
+function unlockAudio() {
+  if (audioCtx) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) audioCtx = new AC();
+  } catch (e) { /* ignore - no Web Audio support */ }
+}
+document.addEventListener("click", unlockAudio, { once: true });
+document.addEventListener("touchstart", unlockAudio, { once: true });
+
+function playAlertChime() {
+  try {
+    if (!audioCtx) unlockAudio();
+    if (!audioCtx) return;
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const now = audioCtx.currentTime;
+    // Two-note "ping-ping" chime.
+    [[880, 0], [1175, 0.15]].forEach(([freq, offset]) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, now + offset);
+      gain.gain.linearRampToValueAtTime(0.35, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.35);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.4);
+    });
+  } catch (e) { /* ignore */ }
+}
+
 // ---- Telepathic Link alert (target's side) ----
-// Vibrate, show "TELEPATHICALLY LINKED!" with an ACCEPT button, and either
-// way (tapped or 5s timeout) move on to reveal the player's own Signal.
-// navigator.vibrate() is a no-op (not an error) on browsers that don't
-// implement it - notably iOS Safari - which is why the visual alert is
-// always the primary cue and vibration is just a bonus.
+// Vibrate + chime, show "TELEPATHICALLY LINKED!" with an ACCEPT button, and
+// either way (tapped or 5s timeout) move on to reveal the player's own
+// Signal. navigator.vibrate() is a no-op (not an error) on browsers that
+// don't implement it - notably iOS Safari - which is why the visual alert
+// and chime are always the primary cues and vibration is just a bonus.
 let telepathicLinkAutoTimer = null;
 
 function showTelepathicLinkAlert(data) {
   try { if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400]); } catch (e) { /* ignore */ }
+  playAlertChime();
   document.getElementById("telepathic-link-alert-overlay").dataset.signal = data.signal || "";
   showOverlay("telepathic-link-alert-overlay");
   clearTimeout(telepathicLinkAutoTimer);
@@ -623,6 +665,7 @@ let pendingTelepathicTeamData = null;
 function showTelepathicTeamAlert(data) {
   pendingTelepathicTeamData = data;
   try { if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400]); } catch (e) { /* ignore */ }
+  playAlertChime();
   showOverlay("telepathic-team-alert-overlay");
   clearTimeout(telepathicTeamAutoTimer);
   telepathicTeamAutoTimer = setTimeout(acceptTelepathicTeamAlert, 5000);

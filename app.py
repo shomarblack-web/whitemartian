@@ -904,13 +904,20 @@ def render_phase_script():
         ]}
 
     elif phase == "Vote":
-        nominees = _join_names(vote_candidates())
-        lines = [f"1. Raise your hand if you want {nominees} to reach Watchtower?"]
+        # No "Raise your hand if you want no one to reach Watchtower?" -
+        # that line only makes sense when there's actually someone to
+        # nominate, so it's simply omitted (not replaced) when the
+        # candidate pool is empty (e.g. everyone active is already Rescued).
+        candidates = vote_candidates()
+        steps = []
+        if candidates:
+            steps.append(f"Raise your hand if you want {_join_names(candidates)} to reach Watchtower?")
         tally = vote_tally()
-        if tally:
-            lines.append(f"2. Calibrating teleporter. Keep still {tally[0][0]}.")
-        else:
-            lines.append("2. Calibrating teleporter\u2026 (waiting for votes)")
+        steps.append(
+            f"Calibrating teleporter. Keep still {tally[0][0]}."
+            if tally else "Calibrating teleporter\u2026 (waiting for votes)"
+        )
+        lines = [f"{i + 1}. {s}" for i, s in enumerate(steps)]
         result = {"phase": "Vote", "kind": "live", "lines": lines}
 
     elif phase == "Accuse":
