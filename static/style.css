@@ -669,12 +669,11 @@ body{
 .prompt-deprecated{ opacity:.5; border-left-color: var(--muted); }
 .prompt-deprecated .ability-title{ text-decoration: line-through; }
 
-/* ---------- Discuss! timer - persistent, upper-right, never an overlay ---------- */
+/* ---------- Timer - persistent, lives inline in the topbar, never an overlay, never hidden ---------- */
 .host-persistent-timer{
-  position: fixed; top: 12px; right: 16px; z-index: 600;
   display: flex; align-items: center; gap: 8px;
   background: var(--panel); border: 1px solid var(--amber); border-radius: 8px;
-  padding: 6px 10px; box-shadow: 0 4px 16px rgba(0,0,0,.35);
+  padding: 6px 10px;
 }
 .host-timer-label{
   font-family:'Rajdhani', sans-serif; font-weight:700; letter-spacing:.06em;
@@ -692,6 +691,13 @@ body{
 }
 .host-timer-btn:hover{ border-color: var(--amber); color: var(--text); }
 .host-timer-close{ font-size: 14px; padding: 4px 8px; }
+
+.roster-total-count{
+  font-family:'Rajdhani', sans-serif; font-weight:700; font-size: 13px;
+  letter-spacing:.03em; color: var(--amber);
+  background: rgba(245,166,35,.12); border: 1px solid var(--amber);
+  border-radius: 4px; padding: 2px 8px; margin-left: 4px;
+}
 
 /* ---------- side panels ---------- */
 .feed-item{ font-size:12px; color: var(--muted); padding: 3px 0; border-bottom: 1px dotted var(--line); }

@@ -41,7 +41,15 @@
     <button class="btn-ghost" style="width:auto;margin:0;padding:8px 14px" title="The opening story script" onclick="openIntro()">Intro</button>
     <button class="btn-ghost" style="width:auto;margin:0;padding:8px 14px" title="Narration scripts" onclick="openPrompts()">Prompts</button>
     <button class="btn-ghost" style="width:auto;margin:0;padding:8px 14px" title="Search every character's full card" onclick="openCardopedia()">Cardopedia</button>
-    <button class="btn-ghost" style="width:auto;margin:0;padding:8px 14px" title="Start discussion timer" onclick="openTimer(timerSeconds > 0 ? timerSeconds : 2*60, 'Discuss!')">Discuss! timer</button>
+    <div id="host-persistent-timer" class="host-persistent-timer">
+      <span id="host-timer-label" class="host-timer-label">Discuss!</span>
+      <span id="host-timer-display" class="mono host-timer-display">02:00</span>
+      <button class="host-timer-btn" id="host-timer-toggle-btn" onclick="toggleTimer()" title="Start/Pause/Resume">Start</button>
+      <button class="host-timer-btn" onclick="adjustTimer(-10)" title="-10 seconds">−10s</button>
+      <button class="host-timer-btn" onclick="adjustTimer(60)" title="+1 minute">+1m</button>
+      <button class="host-timer-btn" onclick="resetTimer()" title="Reset to 2:00">Reset</button>
+      <button class="host-timer-btn host-timer-close" onclick="closeTimer()" title="Stop and reset">Stop</button>
+    </div>
     <div class="mono" id="conn-status" style="font-size:12px;color:var(--muted)">connecting…</div>
   </div>
 </div>
@@ -71,7 +79,7 @@
 <div class="layout">
   <div>
     <div class="panel">
-      <h3>Roster <button class="btn-ghost" style="width:auto;margin:0;padding:5px 10px;font-size:11px" title="Deactivate every character" onclick="if(confirm('Deactivate every active character?')) socket.emit('clear_all_characters')">Clear All</button></h3>
+      <h3>Roster <span id="roster-active-count" class="roster-total-count" title="Activated characters / currently visible characters">0/0</span> <button class="btn-ghost" style="width:auto;margin:0;padding:5px 10px;font-size:11px" title="Deactivate every character" onclick="if(confirm('Deactivate every active character?')) socket.emit('clear_all_characters')">Clear All</button></h3>
       <div id="roster"></div>
     </div>
   </div>
@@ -83,8 +91,8 @@
         <div id="players-list"><div class="empty">Waiting for players to join…</div></div>
         <div class="roster-btn-row">
           <button class="btn-primary roster-btn" id="start-btn" title="Lock the roster" onclick="socket.emit('start_game')">Start</button>
+          <button class="btn-ghost roster-btn" id="arrange-btn" title="Manually drag-and-drop players onto numbered seats" onclick="startArrange()" disabled>Place</button>
           <button class="btn-ghost roster-btn" id="shuffle-btn" title="Randomly assign characters" onclick="doShuffle()" disabled>Shuffle</button>
-          <button class="btn-ghost roster-btn" id="arrange-btn" title="Manually drag-and-drop players onto numbered seats" onclick="startArrange()" disabled>Arrange</button>
         </div>
         <div id="shuffle-error" class="shuffle-error" style="display:none"></div>
       </div>
@@ -174,16 +182,6 @@
       <div id="card-body"></div>
     </div>
   </div>
-</div>
-
-<div id="host-persistent-timer" class="host-persistent-timer" style="display:none">
-  <span id="host-timer-label" class="host-timer-label">Discuss!</span>
-  <span id="host-timer-display" class="mono host-timer-display">02:00</span>
-  <button class="host-timer-btn" id="host-timer-toggle-btn" onclick="toggleTimer()" title="Pause/Resume">Pause</button>
-  <button class="host-timer-btn" onclick="adjustTimer(-10)" title="-10 seconds">−10s</button>
-  <button class="host-timer-btn" onclick="adjustTimer(60)" title="+1 minute">+1m</button>
-  <button class="host-timer-btn" onclick="resetTimer()" title="Reset to 2:00">Reset</button>
-  <button class="host-timer-btn host-timer-close" onclick="closeTimer()" title="Dismiss">&times;</button>
 </div>
 
 <div id="prompts-overlay" class="map-overlay" onclick="if(event.target===this) closePrompts()">

@@ -2577,8 +2577,8 @@ def _do_shuffle(exclude_char_ids=None):
 def on_shuffle_characters():
     if GAME["seats"] and any(not s for s in GAME["seats"]):
         socketio.emit("shuffle_error", {
-            "message": "Some chairs are still empty from Arrange - finish seating "
-                       "everyone (or click Arrange again to start over) before shuffling characters."
+            "message": "Some chairs are still empty from Place - finish seating "
+                       "everyone (or click Place again to start over) before shuffling characters."
         }, room=request.sid)
         return
     ensure_seating()

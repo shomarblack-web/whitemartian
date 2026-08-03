@@ -190,7 +190,7 @@ function renderSeatingDiagram(state) {
   if (!seats.length) {
     if (poolEl) poolEl.innerHTML = "";
     selectedSeatPlayer = null;
-    el.innerHTML = `<div class="empty">Seats are assigned when you Shuffle or Arrange.</div>`;
+    el.innerHTML = `<div class="empty">Seats are assigned when you Shuffle or Place.</div>`;
     return;
   }
 
@@ -799,7 +799,7 @@ socket.on("state", (state) => {
     nextPhaseBtn.disabled = atLastRound;
     nextPhaseBtn.title = atLastRound
       ? "Round 7 is the final round - start a new game to go further"
-      : `End Round ${state.round} and jump straight into Round ${state.round + 1}'s Secret Identity phase`;
+      : `End Round ${state.round} and jump straight into Round ${state.round + 1}'s Report phase`;
   }
 
   if (state.phase_index !== lastSeenPhaseIndex) {
@@ -1042,6 +1042,16 @@ socket.on("state", (state) => {
       placeholder.style.display = "none";
     }
   });
+
+  // Overall activated-character counter next to the "Roster" heading -
+  // same "active/visible" convention as each team's own X/Y, just summed
+  // across every team so it updates live on every card click too.
+  const rosterCountEl = document.getElementById("roster-active-count");
+  if (rosterCountEl) {
+    const allVisibleRows = Array.from(rosterEl.querySelectorAll(".char-row")).filter(r => !r.classList.contains("row-hidden"));
+    const allActiveVisibleCount = allVisibleRows.filter(r => r.classList.contains("active")).length;
+    rosterCountEl.textContent = `${allActiveVisibleCount}/${allVisibleRows.length}`;
+  }
 
   const tallyEl = document.getElementById("tally");
   const voteCountEl = document.getElementById("vote-count");
@@ -1459,9 +1469,14 @@ function resolveHostageConsequence() {
   socket.emit("hostage_consequence", { id: latestState.hostage_event.hostage_id });
 }
 
-// ---- Discuss! countdown timer ----
+// ---- Persistent countdown timer - always visible in the topbar (where the
+// old standalone "Discuss! timer" button used to live). Doubles as the
+// generic countdown for Discuss!/Vote! and other timed prompts (hostage
+// reveal windows, etc. - see the openTimer(10, ...) calls elsewhere), so it
+// never fully hides anymore; "Stop" just resets it back to an idle state. ----
 let timerSeconds = 2 * 60;
 let timerRunning = false;
+let timerStarted = false;   // false = idle, never started (or Stopped back to idle)
 let timerHandle = null;
 let timerBeeped = false;
 let timerLabel = "Discuss!";
@@ -1471,8 +1486,6 @@ function openTimer(startSeconds, label) {
   timerBeeped = false;
   timerLabel = label || "Discuss!";
   document.getElementById("host-timer-label").textContent = timerLabel;
-  document.getElementById("host-persistent-timer").style.display = "flex";
-  renderTimer();
   startTimerInterval();
 }
 
@@ -1481,12 +1494,18 @@ function renderTimer() {
   const s = Math.max(timerSeconds, 0) % 60;
   const display = document.getElementById("host-timer-display");
   display.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  display.classList.toggle("time-up", timerSeconds <= 0);
-  document.getElementById("host-timer-toggle-btn").textContent = timerRunning ? "Pause" : "Resume";
-  socket.emit("sync_timer", { label: timerLabel, remaining: timerSeconds, running: timerRunning });
+  display.classList.toggle("time-up", timerStarted && timerSeconds <= 0);
+  document.getElementById("host-timer-toggle-btn").textContent =
+    timerRunning ? "Pause" : (timerStarted ? "Resume" : "Start");
+  socket.emit("sync_timer", {
+    label: timerStarted ? timerLabel : null,
+    remaining: timerSeconds,
+    running: timerRunning,
+  });
 }
 
 function startTimerInterval() {
+  timerStarted = true;
   timerRunning = true;
   clearInterval(timerHandle);
   timerHandle = setInterval(() => {
@@ -1501,7 +1520,14 @@ function startTimerInterval() {
 }
 
 function toggleTimer() {
-  if (timerRunning) {
+  if (!timerStarted) {
+    // Widget was idle - "Start" begins a fresh Discuss!-length countdown,
+    // same as the old dedicated "Discuss! timer" button used to.
+    timerSeconds = timerSeconds > 0 ? timerSeconds : 2 * 60;
+    timerLabel = timerLabel || "Discuss!";
+    document.getElementById("host-timer-label").textContent = timerLabel;
+    startTimerInterval();
+  } else if (timerRunning) {
     timerRunning = false;
     clearInterval(timerHandle);
     renderTimer();
@@ -1523,10 +1549,16 @@ function adjustTimer(deltaSeconds) {
 }
 
 function closeTimer() {
+  // "Stop" - resets to the idle state. The widget itself always stays
+  // visible; this no longer hides it.
   clearInterval(timerHandle);
   timerRunning = false;
-  document.getElementById("host-persistent-timer").style.display = "none";
-  socket.emit("sync_timer", { label: null, remaining: 0, running: false });
+  timerStarted = false;
+  timerSeconds = 2 * 60;
+  timerBeeped = false;
+  timerLabel = "Discuss!";
+  document.getElementById("host-timer-label").textContent = timerLabel;
+  renderTimer();
 }
 
 function beep() {
