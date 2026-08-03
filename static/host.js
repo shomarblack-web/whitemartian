@@ -402,19 +402,6 @@ for (let i = 1; i <= NUM_ROUNDS; i++) {
 
 const phaseStrip = document.getElementById("phase-strip");
 PHASES.forEach((p, idx) => {
-  if (p === "Inspect") {
-    const nextBtn = document.createElement("button");
-    nextBtn.id = "next-phase-btn";
-    nextBtn.className = "next-phase-btn";
-    nextBtn.type = "button";
-    nextBtn.textContent = "Next Phase ▶";
-    nextBtn.title = "End this round and jump straight into the next round's Secret Identity phase";
-    nextBtn.onclick = () => {
-      if (latestState && latestState.round >= NUM_ROUNDS) return;
-      socket.emit("advance_round");
-    };
-    phaseStrip.appendChild(nextBtn);
-  }
   const el = document.createElement("div");
   el.className = "led led-phase";
   el.textContent = p;
@@ -429,6 +416,20 @@ PHASES.forEach((p, idx) => {
   };
   el.dataset.phase = idx;
   phaseStrip.appendChild(el);
+
+  if (p === "Inspect") {
+    const nextBtn = document.createElement("button");
+    nextBtn.id = "next-phase-btn";
+    nextBtn.className = "next-phase-btn";
+    nextBtn.type = "button";
+    nextBtn.textContent = "Next Phase ▶";
+    nextBtn.title = "End this round and jump straight into the next round's Report phase";
+    nextBtn.onclick = () => {
+      if (latestState && latestState.round >= NUM_ROUNDS) return;
+      socket.emit("advance_round");
+    };
+    phaseStrip.appendChild(nextBtn);
+  }
 });
 
 function anyoneShielded() {
@@ -1704,7 +1705,15 @@ function renderPhaseScriptBody(script) {
     lastInspectPhase = null;
     lastProtectPhase = null;
     linesEl.innerHTML = script.lines.length
-      ? script.lines.map(line => `<div class="phase-script-line">${line}</div>`).join("")
+      ? script.lines.map(line => {
+          // Report-phase recap bullets ("• ...") render nested/indented
+          // under their "DURING THE FLASH..." header line, rather than as
+          // flush top-level lines like the rest of the phase scripts.
+          const isBullet = line.startsWith("• ");
+          const cls = isBullet ? "phase-script-bullet" : "phase-script-line";
+          const text = isBullet ? line.slice(2) : line;
+          return `<div class="${cls}">${text}</div>`;
+        }).join("")
       : `<div class="phase-script-line" style="opacity:.6">No line to read for this phase.</div>`;
   }
 

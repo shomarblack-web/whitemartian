@@ -162,6 +162,27 @@ def fresh_map_state():
     return {name: False for name in DCEU_LOCATIONS}  # False = not blacked out
 
 
+def fresh_round_events():
+    """A fresh per-round event bucket. Populated live as things actually
+    happen (not reconstructed after the fact) so next round's Report
+    phase recap can narrate exactly what transpired. See render_phase_script's
+    "Report" branch for how each key becomes a bullet line.
+      rescued / eliminated  - existing coarse trackers (ELM/Watchtower button clicks)
+      headache_survived     - targeted by White Martians, unshielded, health hit
+                               the floor above 0 (Protect-phase-close resolution)
+      dropped               - same, but health hit exactly 0 this round
+      shielded_negated      - targeted, but a shield (Superman, Green Lantern,
+                               Plastic Man, etc.) landed and cleared it first
+      flash_swaps           - [{"flash": cid, "target": cid}, ...] from The
+                               Flash's Fastest Man Alive seat swap this round
+    """
+    return {
+        "rescued": [], "eliminated": [],
+        "headache_survived": [], "dropped": [],
+        "shielded_negated": [], "flash_swaps": [],
+    }
+
+
 FREE_PACK_IDS = {p["id"] for p in PACKS if p.get("free")}
 
 GAME = {
@@ -177,8 +198,8 @@ GAME = {
                              # drives hiding never-activated characters from the roster.
     "unlocked_packs": set(FREE_PACK_IDS),
     "last_vote_winner": None,        # character id, captured when Vote phase ends
-    "round_events": {"rescued": [], "eliminated": []},  # this round, so far
-    "round_history": {},             # round_number -> {"rescued":[ids],"eliminated":[ids]}
+    "round_events": fresh_round_events(),  # this round, so far
+    "round_history": {},             # round_number -> fresh_round_events()-shaped dict
     "super_abilities_announced": False,
     "hostage_event": None,
     "game_over": None,
@@ -709,6 +730,8 @@ def apply_shield(target_cid, protector_cid, notify=True):
         target_st["eliminated"] = False
         if target_st.get("last_action") == "end":
             target_st["last_action"] = None
+        if target_cid not in GAME["round_events"]["shielded_negated"]:
+            GAME["round_events"]["shielded_negated"].append(target_cid)
         log_activity(f"{protector_display} shielded {target_display} - negated their Eliminated status!")
         if notify:
             push_condition_alert(target_cid, "Shielded!",
@@ -834,24 +857,46 @@ def render_phase_script():
             )
             martian_label = "White Martian" if martian_count == 1 else "White Martians"
             text = (
-                f"...I'm sending {heroes} to the Martian Prison to rescue {civilians}. "
+                f"THIS IS WATCHTOWER...I'm sending {heroes} to the Martian Prison to rescue {civilians}. "
                 f"You're surprised to find {villains} in the prison as well. "
                 f"Scanners indicate at least {martian_count} {martian_label} among you."
             )
             result = {"phase": "Report", "kind": "briefing", "lines": [text]}
         else:
-            rescued = [display_name_for(c) for c in history["rescued"] if c in CHARACTERS_BY_ID]
-            eliminated = [display_name_for(c) for c in history["eliminated"] if c in CHARACTERS_BY_ID]
-            rescued_clause = (
-                f"I safely beamed {_join_names(rescued)} up to Watchtower."
-                if rescued else "No one made it to Watchtower last round."
-            )
-            eliminated_clause = (
-                f"Unfortunately, {_join_names(eliminated)} didn't survive the night."
-                if eliminated else "Everyone else made it through the night safely."
-            )
-            text = f"Welcome back. {rescued_clause} {eliminated_clause}"
-            result = {"phase": "Report", "kind": "recap", "lines": [text]}
+            def _player_name_for(cid):
+                pname = (GAME["characters"].get(cid, {}).get("player_name") or "").strip()
+                return pname or display_name_for(cid)
+
+            bullets = []
+            for cid in history.get("headache_survived", []):
+                name = _player_name_for(cid)
+                bullets.append(
+                    f"During the flash of the teleporter beam, {name} got a really "
+                    f"bad headache, BUT THEY'RE OK!"
+                )
+            for cid in history.get("dropped", []):
+                name = _player_name_for(cid)
+                bullets.append(
+                    f"During the flash of the teleporter beam, {name} got a really "
+                    f"bad headache AND DROPPED. {display_name_for(cid)} is Eliminated!"
+                )
+            for swap in history.get("flash_swaps", []):
+                flash_name = _player_name_for(swap.get("flash"))
+                target_name = _player_name_for(swap.get("target"))
+                bullets.append(
+                    f"During the flash of the teleporter beam, {target_name} and "
+                    f"{flash_name} switched places!"
+                )
+            if history.get("shielded_negated"):
+                bullets.append("During the flash of the teleporter beam…nothing happened!")
+
+            lines = ["THIS IS WATCHTOWER. Welcome back."]
+            lines.append("DURING THE FLASH OF THE TELEPORTER BEAM…")
+            if bullets:
+                lines.extend(f"• {b}" for b in bullets)
+            else:
+                lines.append("• Nothing to report from last round.")
+            result = {"phase": "Report", "kind": "recap", "lines": lines}
 
     elif phase == "Discuss":
         result = {"phase": "Discuss", "kind": "static", "lines": [
@@ -1382,7 +1427,7 @@ def _set_round(new_round):
         # Archive whatever happened in the round we're leaving, then start
         # a fresh events bucket for the round we're entering.
         GAME["round_history"][old_round] = GAME["round_events"]
-        GAME["round_events"] = {"rescued": [], "eliminated": []}
+        GAME["round_events"] = fresh_round_events()
     GAME["round"] = new_round
     log_activity(f"Round set to {GAME['round']}")
 
@@ -1411,15 +1456,17 @@ def on_set_round(data):
 
 @socketio.on("advance_round")
 def on_advance_round():
-    """'Next Phase' button on the host console, to the left of Inspect on
+    """'Next Phase' button on the host console, to the right of Inspect on
     the phase strip - ends the current round and jumps straight into the
-    next round's Secret Identity phase in one click. No-ops once round 7
+    next round's Report phase in one click. Secret Identity is effectively
+    "Round 0" and is only ever entered manually by the host/Watchtower
+    console, never automatically via this button. No-ops once round 7
     (the last round) is already underway; the button is also grayed out
     client-side at that point, this is just the server-side backstop."""
     if GAME["round"] >= NUM_ROUNDS:
         return
     _set_round(GAME["round"] + 1)
-    _set_phase_by_index(PHASES.index("Secret Identity"))
+    _set_phase_by_index(PHASES.index("Report"))
 
 
 def _set_phase_by_index(idx, error_sid=None):
@@ -1462,6 +1509,12 @@ def _set_phase_by_index(idx, error_sid=None):
                 if st["health"] < old_health:
                     log_activity(f"{display_name_for(cid)} was Eliminated and not shielded - "
                                  f"lost 1 health ({st['health']} remaining)")
+                    # Record for next round's Report phase recap - "headache,
+                    # but OK" if they've still got health left, "dropped" if
+                    # this hit brought them to 0.
+                    bucket = "headache_survived" if st["health"] > 0 else "dropped"
+                    if cid not in GAME["round_events"][bucket]:
+                        GAME["round_events"][bucket].append(cid)
                     pname = (st.get("player_name") or "").strip()
                     sid = _sid_for_player(pname) if pname else None
                     if sid:
@@ -2396,6 +2449,7 @@ def on_submit_speedster_swap_target(data):
     if not swap_seats(flash_name, target_name):
         return
     log_activity(f"{flash_name} swapped seats with {target_name}! (Fastest Man Alive)")
+    GAME["round_events"]["flash_swaps"].append({"flash": flash_cid, "target": target_cid})
     socketio.emit("seat_swap_announcement", {
         "player_a": flash_name, "player_b": target_name,
     }, room="players")
@@ -3676,7 +3730,7 @@ def on_new_game():
     GAME["shuffled"] = False
     GAME["unlocked_packs"] = set(FREE_PACK_IDS)
     GAME["last_vote_winner"] = None
-    GAME["round_events"] = {"rescued": [], "eliminated": []}
+    GAME["round_events"] = fresh_round_events()
     GAME["round_history"] = {}
     GAME["super_abilities_announced"] = False
     GAME["hostage_event"] = None
