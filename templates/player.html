@@ -30,11 +30,6 @@
   <div class="player-toolbar" id="player-toolbar" style="display:none">
     <button class="btn-ghost" style="width:auto;margin:0;padding:8px 12px" onclick="openMyCard()">My Card</button>
     <button class="btn-ghost" style="width:auto;margin:0;padding:8px 12px" onclick="openRules()">Rules &amp; Phases</button>
-    <button class="btn-ghost" style="width:auto;margin:0;padding:8px 12px" onclick="openGoals()">Goals</button>
-    <button class="btn-ghost" style="width:auto;margin:0;padding:8px 12px;position:relative" onclick="openAlerts()">
-      Alerts
-      <span id="alerts-badge" class="alerts-badge" style="display:none">0</span>
-    </button>
   </div>
 </div>
 
@@ -109,11 +104,8 @@
 <div id="super-overlay" class="map-overlay">
   <div class="reveal-modal kirby-frame">
     <div class="kirby-inner">
-      <div class="reveal-label">⭐ Super Ability UNLOCKED!</div>
+      <div class="reveal-label">⭐ Super Ability Active</div>
       <div class="reveal-name" id="super-character-name" style="font-size:28px">—</div>
-      <div style="font-size:13px; color:var(--muted); margin-top:4px">
-        You may now use your Super Ability during the appropriate Phase!
-      </div>
       <div id="super-ability-text" style="font-size:14px; color:var(--text); margin:14px 0; line-height:1.5"></div>
       <div class="reveal-buttons">
         <button class="btn-ghost" onclick="closeSuperOverlay()">Got it</button>
@@ -166,7 +158,6 @@
       <p style="color:var(--muted); font-size:13px">
         Silently pick a player to protect this round.
       </p>
-      <div id="protect-reject-msg" style="display:none; color:#ff8a5c; font-size:13px; margin-bottom:10px; font-weight:700;"></div>
       <div id="protect-candidate-list" class="hostage-target-list"></div>
     </div>
   </div>
@@ -367,8 +358,8 @@
         they won't be told.
       </p>
       <div class="reveal-buttons">
-        <button class="btn-primary" onclick="submitPlasticManChoice('left')">Left-side</button>
-        <button class="btn-primary" onclick="submitPlasticManChoice('right')">Right-side</button>
+        <button class="btn-primary" onclick="submitPlasticManChoice('left')">Left</button>
+        <button class="btn-primary" onclick="submitPlasticManChoice('right')">Right</button>
       </div>
     </div>
   </div>
@@ -491,33 +482,6 @@
         <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeRules()">Close</button>
       </div>
       <div id="rules-body"></div>
-    </div>
-  </div>
-</div>
-
-<div id="goals-overlay" class="map-overlay" onclick="if(event.target===this) closeGoals()">
-  <div class="card-modal kirby-frame">
-    <div class="kirby-inner">
-      <div class="map-modal-head">
-        <h3 style="margin:0">Goals</h3>
-        <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeGoals()">Close</button>
-      </div>
-      <div id="goals-body"></div>
-    </div>
-  </div>
-</div>
-
-<div id="alerts-overlay" class="map-overlay" onclick="if(event.target===this) closeAlerts()">
-  <div class="card-modal kirby-frame">
-    <div class="kirby-inner">
-      <div class="map-modal-head">
-        <h3 style="margin:0">Alerts</h3>
-        <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeAlerts()">Close</button>
-      </div>
-      <div style="font-size:12px; color:var(--muted); margin-bottom:10px">
-        A log of prompts and alerts Watchtower has sent you this session. Tap one to reopen it.
-      </div>
-      <div id="alerts-body"></div>
     </div>
   </div>
 </div>

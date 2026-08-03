@@ -81,9 +81,10 @@
       <h3><span class="panel-title-wrap">Players</span><span class="panel-chevron">▾</span></h3>
       <div class="panel-body">
         <div id="players-list"><div class="empty">Waiting for players to join…</div></div>
-        <div style="display:flex; gap:8px; margin-top:10px">
-          <button class="btn-primary" id="start-btn" title="Lock the roster" onclick="socket.emit('start_game')" style="margin:0">Start</button>
-          <button class="btn-ghost" id="shuffle-btn" title="Randomly assign characters" onclick="doShuffle()" disabled style="margin:0">Shuffle</button>
+        <div class="roster-btn-row">
+          <button class="btn-primary roster-btn" id="start-btn" title="Lock the roster" onclick="socket.emit('start_game')">Start</button>
+          <button class="btn-ghost roster-btn" id="shuffle-btn" title="Randomly assign characters" onclick="doShuffle()" disabled>Shuffle</button>
+          <button class="btn-ghost roster-btn" id="arrange-btn" title="Manually drag-and-drop players onto numbered seats" onclick="startArrange()" disabled>Arrange</button>
         </div>
         <div id="shuffle-error" class="shuffle-error" style="display:none"></div>
       </div>
@@ -92,6 +93,7 @@
     <div class="panel collapsible">
       <h3><span class="panel-title-wrap">Seating Chart</span><span class="panel-chevron">▾</span></h3>
       <div class="panel-body">
+        <div id="seat-pool"></div>
         <div id="seating-diagram"></div>
       </div>
     </div>
@@ -174,14 +176,19 @@
   </div>
 </div>
 
-<div id="host-persistent-timer" class="host-persistent-timer" style="display:none">
-  <span id="host-timer-label" class="host-timer-label">Discuss!</span>
-  <span id="host-timer-display" class="mono host-timer-display">02:00</span>
-  <button class="host-timer-btn" id="host-timer-toggle-btn" onclick="toggleTimer()" title="Pause/Resume">Pause</button>
-  <button class="host-timer-btn" onclick="adjustTimer(-10)" title="-10 seconds">−10s</button>
-  <button class="host-timer-btn" onclick="adjustTimer(60)" title="+1 minute">+1m</button>
-  <button class="host-timer-btn" onclick="resetTimer()" title="Reset to 2:00">Reset</button>
-  <button class="host-timer-btn host-timer-close" onclick="closeTimer()" title="Dismiss">&times;</button>
+<div id="timer-overlay" class="map-overlay">
+  <div class="timer-modal">
+    <div class="map-modal-head">
+      <h3 style="margin:0" id="timer-title">Discuss!</h3>
+      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeTimer()">Close</button>
+    </div>
+    <div class="timer-display mono" id="timer-display">02:00</div>
+    <div class="timer-controls">
+      <button class="btn-ghost" id="timer-toggle-btn" onclick="toggleTimer()">Pause</button>
+      <button class="btn-ghost" onclick="resetTimer()">Reset</button>
+      <button class="btn-ghost" onclick="adjustTimer(60)">+1 min</button>
+    </div>
+  </div>
 </div>
 
 <div id="prompts-overlay" class="map-overlay" onclick="if(event.target===this) closePrompts()">
@@ -257,10 +264,6 @@
   const PROMPTS = {{ prompts | tojson }};
   const INTRO_SCRIPT = {{ intro_script | tojson }};
   const PACKS = {{ packs | tojson }};
-  const PROTECTOR_ICONS = {{ protector_icons | tojson }};
-  const DEFAULT_PROTECTOR_ICON = {{ default_protector_icon | tojson }};
-  const PROTECTOR_TIERS = {{ protector_tiers | tojson }};
-  const DEFAULT_PROTECTOR_TIER = {{ default_protector_tier | tojson }};
 </script>
 <script src="/static/host.js"></script>
 </body>

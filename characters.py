@@ -38,56 +38,9 @@ SHIELD_CHARACTERS = {
     "superman", "captain_marvel", "zatanna",
     "booster_gold", "krypto", "streaky", "supergirl",
     "superboy", "wonder_girl", "miss_martian", "freddie_freeman",
-    "kendra_saunders", "mary_batson", "the_flash",
-    "green_lantern", "plastic_man",
+    "kendra_saunders", "mary_batson",
 }
 SHIELD_START = 1
-
-# Protect-phase badge shown in a filled protection dot - which protector
-# shielded this slot. Colors/glyphs are per your spec; a shared default
-# covers anyone Dr. Alchemy grants ad-hoc Protector status to, since they
-# have no natural shield icon of their own.
-PROTECTOR_ICONS = {
-    "superman":        {"bg": "linear-gradient(135deg, #3b7fe0 50%, #dc2626 50%)", "glyph": "S", "fg": "#ffffff"},
-    "supergirl":       {"bg": "linear-gradient(135deg, #3b7fe0 50%, #f3aecb 50%)", "glyph": "S", "fg": "#ffffff"},
-    "superboy":        {"bg": "linear-gradient(135deg, #dc2626 50%, #111318 50%)", "glyph": "S", "fg": "#ffffff"},
-    "the_flash":       {"bg": "#dc2626", "glyph": "⚡", "fg": "#ffffff"},
-    "zatanna":         {"bg": "#f5f7fa", "glyph": "🎩", "fg": "#111318"},
-    "krypto":          {"bg": "#3b7fe0", "glyph": "🐶", "fg": "#ffffff"},
-    "streaky":         {"bg": "#f3aecb", "glyph": "🐱", "fg": "#3a1a28"},
-    "mary_batson":     {"bg": "#f3aecb", "glyph": "⚡", "fg": "#3a1a28"},
-    "freddie_freeman": {"bg": "#3b7fe0", "glyph": "⚡", "fg": "#ffffff"},
-    "wonder_girl":     {"bg": "#f3aecb", "glyph": "W", "fg": "#3a1a28"},
-    "captain_marvel":  {"bg": "linear-gradient(135deg, #dc2626 50%, #f5d76e 50%)", "glyph": "⚡", "fg": "#111318"},
-    "beast_boy":       {"bg": "#2fbf6e", "glyph": "🦏", "fg": "#06210f"},
-    "green_lantern":   {"bg": "#2fbf6e", "glyph": "G", "fg": "#06210f"},
-    "plastic_man":     {"bg": "#dc2626", "glyph": "P", "fg": "#ffffff"},
-}
-DEFAULT_PROTECTOR_ICON = {"bg": "#8a93a1", "glyph": "🛡️", "fg": "#ffffff"}
-
-# Protect-phase priority tiers - lower number acts first. The host invites
-# eligible protectors one at a time in this order (Tier 1 fully resolves
-# before anyone in Tier 2 is invited, etc.). If a target is already
-# shielded by someone in a STRICTLY earlier tier, the current protector is
-# blocked and must pick someone else. If the existing shield came from a
-# same-tier protector, it's informational only - not blocking.
-PROTECTOR_TIERS = {
-    "green_lantern": 1,
-    "plastic_man": 1,
-    "the_flash": 2,
-    "superman": 3,
-    "superboy": 3,
-    "supergirl": 3,
-    "captain_marvel": 3,
-    "mary_batson": 3,
-    "freddie_freeman": 3,
-    "zatanna": 4,
-    "krypto": 4,
-    "streaky": 4,
-    "wonder_girl": 4,
-    "beast_boy": 4,
-}
-DEFAULT_PROTECTOR_TIER = 5  # anyone else (e.g. an ad-hoc Dr. Alchemy Protector)
 
 # "Citizen's arrest" handcuffs toggle - the three law-enforcement civilians
 CUFFS_CHARACTERS = {"james_gordon", "joe_west", "maggie_sawyer"}

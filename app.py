@@ -35,7 +35,6 @@ from characters import (
     NARRATION_PROMPTS, INTRO_SCRIPT, PACKS, PACK_LABELS, SWITCH_CHARACTERS,
     HOSTAGE_ABILITIES, KRYPTONIAN_IDS, KNOWS_IDENTITY_OF,
     DIFFICULTY_PRESETS, FAMILIES, HERO_TO_FAMILY, SWITCH_HERO_CIVILIAN_IDS,
-    PROTECTOR_ICONS, DEFAULT_PROTECTOR_ICON, PROTECTOR_TIERS, DEFAULT_PROTECTOR_TIER,
 )
 
 CARDS = json.loads((Path(__file__).parent / "cards.json").read_text())
@@ -106,15 +105,7 @@ def fresh_character_state():
             "active": False,
             "player_name": "",
             "health": c["start_health"] if c["has_health"] else None,
-            # Each slot is None (empty) or the protector character id who
-            # filled it - drives the colored protector badge shown on the
-            # host roster, not just an anonymous filled/unfilled dot.
-            "protection": [None, None, None],
-            # True the moment any protector shields this character this
-            # round - separate from the 3 protection slots themselves so
-            # the host roster can show a single "Shielded" condition badge
-            # regardless of how many slots ended up filled.
-            "shielded": False,
+            "protection": [False, False, False],
             "last_action": None,     # e.g. "Watchtower", "Exposed", "Deactivated"
             "shield": None if shield_locked_pending_reveal else (SHIELD_START if c["has_shield"] else None),
             "cuffed": False if c["has_cuffs"] else None,
@@ -186,22 +177,15 @@ GAME = {
     "pending_inspection": None,
     "lobo_tracker": {"civilian": 0, "hero": 0, "martian": 0},
     "active_inspector_cid": None,
-    # Every Inspect-ability character who has already been invited to ask
-    # Watchtower a question this Inspect phase - prevents the host from
-    # re-sending the prompt to the same character more than once per phase.
-    "inspect_responded_cids": [],
-    # Batch Protect-phase automation: everyone currently invited-and-still-
-    # deciding (pending) vs. everyone who's already acted or been skipped
-    # this Protect-phase visit (responded), so "Start Protect Phase" is
-    # safely re-clickable without double-inviting anyone.
-    "active_protector_cids": [],
-    "protect_responded_cids": [],
+    "active_protector_cid": None,
     "active_absorber_cid": None,
     "active_alchemist_cid": None,
     "pending_alchemy": None,
     "active_arrester_cid": None,
     "round_change_requests": {},
     "seats": [],
+    "pending_gl_reveals": [],
+    "plastic_man_shielded": [],
     "spectre_triggered": False,
     "active_wake_cid": None,
     "active_good_doctor_cid": None,
@@ -471,12 +455,10 @@ def vote_candidates():
     the pool of people who can be voted for. Deliberately just names, with
     no character id attached, so the payload can't be used to reconstruct
     who's playing whom even by someone inspecting raw network traffic.
-    Rescued players are excluded - once in Watchtower they can no longer
-    be targeted for elimination or teleportation, per their card text.
     """
     return [
         st["player_name"] for st in GAME["characters"].values()
-        if st["active"] and st.get("player_name") and not st.get("rescued")
+        if st["active"] and st.get("player_name")
     ]
 
 
@@ -511,11 +493,10 @@ def active_kryptonian_count(exclude_cid=None):
 def eliminate_candidates():
     """Real names of active, non-Martian players - the pool White Martians
     (and anyone Dr. Alchemy made an Eliminator) vote on to eliminate.
-    Eliminators don't vote each other off, same as Martians. Rescued
-    players are excluded - safe in Watchtower, can't be targeted."""
+    Eliminators don't vote each other off, same as Martians."""
     return [
         st["player_name"] for cid, st in GAME["characters"].items()
-        if st["active"] and st.get("player_name") and not st.get("rescued")
+        if st["active"] and st.get("player_name")
         and CHARACTERS_BY_ID.get(cid, {}).get("team") != "martian"
         and st.get("alchemy_type") != "eliminator"
     ]
@@ -637,85 +618,6 @@ def eligible_protectors():
             or st.get("alchemy_type") == "protector"
         )
     ]
-
-
-def protect_tier(cid):
-    return PROTECTOR_TIERS.get(cid, DEFAULT_PROTECTOR_TIER)
-
-
-_ROSTER_ORDER = {c["id"]: i for i, c in enumerate(CHARACTERS)}
-
-
-def protect_queue():
-    """Eligible protectors who haven't acted this Protect-phase visit yet,
-    ordered by priority tier (Green Lantern/Plastic Man first, then Flash,
-    then the Super-family, then everyone else) and roster order as a
-    tiebreak within a tier. Index 0 is who the host should invite next."""
-    responded = set(GAME["protect_responded_cids"])
-    protectors = [p for p in eligible_protectors() if p["id"] not in responded]
-    protectors.sort(key=lambda p: (protect_tier(p["id"]), _ROSTER_ORDER.get(p["id"], 999)))
-    return protectors
-
-
-def existing_protector_of(target_cid):
-    """The protector cid currently occupying one of target_cid's protection
-    slots this round, or None if nobody's shielded them yet. Under the new
-    one-target-shielded-once rule, at most one slot is ever actually filled
-    per character per round now."""
-    target_st = GAME["characters"].get(target_cid, {})
-    for slot in target_st.get("protection", []):
-        if slot:
-            return slot
-    return None
-
-
-def apply_shield(target_cid, protector_cid, notify=True):
-    """The one place that actually shields a player - fills the first open
-    protection slot on target_cid with protector_cid's badge, spends one of
-    the protector's own shield charges if they track a personal count (Green
-    Lantern and Plastic Man don't - their abilities are unlimited/passive),
-    and negates an in-progress Eliminated status since Protect always
-    resolves after Eliminate! in the phase order (PHASES puts Eliminate
-    before Protect within a round) - flips the ELIMINATED badge to SHIELDED
-    instead of just leaving both true.
-
-    notify=False keeps this entirely silent (no alert to the shielded
-    player) for Green Lantern's Light and Plastic Man's Group Hug, which
-    are both designed to never (or only much later) tell the target -
-    everyone else gets an immediate private "Shielded!" alert.
-
-    Returns True if a slot was available and filled, False if the target's
-    protection was already full this round (the protector's charge is NOT
-    spent on a failed attempt)."""
-    target_st = GAME["characters"].get(target_cid)
-    protector_st = GAME["characters"].get(protector_cid)
-    if not target_st or not protector_st:
-        return False
-    if None not in target_st["protection"]:
-        return False
-    target_st["protection"][target_st["protection"].index(None)] = protector_cid
-    if protector_st.get("shield") is not None:
-        cap = protector_st.get("shield_cap_override") or MAX_HEALTH
-        protector_st["shield"] = max(0, min(cap, protector_st["shield"] - 1))
-    protector_display = display_name_for(protector_cid)
-    target_display = display_name_for(target_cid)
-    was_eliminated = bool(target_st.get("eliminated"))
-    target_st["shielded"] = True
-    if was_eliminated:
-        target_st["eliminated"] = False
-        if target_st.get("last_action") == "end":
-            target_st["last_action"] = None
-        log_activity(f"{protector_display} shielded {target_display} - negated their Eliminated status!")
-        if notify:
-            push_condition_alert(target_cid, "Shielded!",
-                                  f"{protector_display} shielded you from elimination - "
-                                  f"you're safe! Your Eliminated status has been cleared.")
-    else:
-        log_activity(f"{protector_display} shielded {target_display}")
-        if notify:
-            push_condition_alert(target_cid, "Shielded!",
-                                  f"{protector_display} shielded you from elimination this round.")
-    return True
 
 
 def spotlight_characters():
@@ -942,6 +844,12 @@ def public_state(reveal_names):
         "kryptonian_counts": {
             cid: active_kryptonian_count(exclude_cid=cid) for cid in KRYPTONIAN_COUNT_CHARACTERS
         },
+        "green_lantern_neighbors": (
+            [n for n in seat_neighbors(
+                (GAME["characters"].get("green_lantern", {}).get("player_name") or "").strip()
+            ) if n] if GAME["characters"].get("green_lantern", {}).get("active") else []
+        ),
+        "plastic_man_shielded": GAME["plastic_man_shielded"],
         "hostage_event": GAME["hostage_event"],
         "game_over": GAME["game_over"],
         "timer": GAME["timer"],
@@ -957,10 +865,8 @@ def public_state(reveal_names):
         state["votes"] = GAME["votes"]
         state["pending_inspection"] = GAME["pending_inspection"]
         state["active_inspector_cid"] = GAME["active_inspector_cid"]
-        state["inspect_responded_cids"] = GAME["inspect_responded_cids"]
         state["eligible_inspectors"] = eligible_inspectors()
-        state["active_protector_cids"] = GAME["active_protector_cids"]
-        state["protect_responded_cids"] = GAME["protect_responded_cids"]
+        state["active_protector_cid"] = GAME["active_protector_cid"]
         state["eligible_protectors"] = eligible_protectors()
         state["lobo_tracker"] = GAME["lobo_tracker"]
         state["active_absorber_cid"] = GAME["active_absorber_cid"]
@@ -1032,8 +938,7 @@ def push_my_votes():
         choice = GAME["votes"].get(name)
         can_vote = False
         if phase == "Vote":
-            cid = find_player_character_id(name)
-            can_vote = not (cid and current_arrest_scope(cid) == "phases")
+            can_vote = True
         elif phase == "Eliminate":
             cid = find_player_character_id(name)
             can_vote = bool(cid) and (
@@ -1284,10 +1189,6 @@ def host_page():
         prompts=NARRATION_PROMPTS,
         intro_script=INTRO_SCRIPT,
         packs=PACKS,
-        protector_icons=PROTECTOR_ICONS,
-        default_protector_icon=DEFAULT_PROTECTOR_ICON,
-        protector_tiers=PROTECTOR_TIERS,
-        default_protector_tier=DEFAULT_PROTECTOR_TIER,
     )
 
 
@@ -1366,12 +1267,10 @@ def on_disconnect():
     PLAYER_SIDS.pop(request.sid, None)
 
 
-def _set_round(new_round):
-    """Core round-change logic, shared by the direct round-strip click
-    (set_round) and the one-click 'Next Phase' round advance
-    (advance_round)."""
+@socketio.on("set_round")
+def on_set_round(data):
     old_round = GAME["round"]
-    new_round = max(1, min(NUM_ROUNDS, int(new_round)))
+    new_round = max(1, min(NUM_ROUNDS, int(data["round"])))
     if new_round != old_round:
         # Archive whatever happened in the round we're leaving, then start
         # a fresh events bucket for the round we're entering.
@@ -1395,25 +1294,22 @@ def _set_round(new_round):
             if superman_st.get("shield") is not None:
                 superman_st["shield"] = min(MAX_HEALTH, superman_st["shield"])
 
+    if new_round >= 3 and not GAME["super_abilities_announced"]:
+        GAME["super_abilities_announced"] = True
+        log_activity("Super Abilities are now active!")
+        for cid in super_active_characters():
+            ability = real_super_ability(cid)
+            pname = (GAME["characters"][cid].get("player_name") or "").strip().lower()
+            if not pname:
+                continue
+            for sid, name in PLAYER_SIDS.items():
+                if name.strip().lower() == pname:
+                    socketio.emit("super_ability_unlocked", {
+                        "character": display_name_for(cid),
+                        "ability": ability,
+                    }, room=sid)
+
     broadcast()
-
-
-@socketio.on("set_round")
-def on_set_round(data):
-    _set_round(data["round"])
-
-
-@socketio.on("advance_round")
-def on_advance_round():
-    """'Next Phase' button on the host console, to the left of Inspect on
-    the phase strip - ends the current round and jumps straight into the
-    next round's Secret Identity phase in one click. No-ops once round 7
-    (the last round) is already underway; the button is also grayed out
-    client-side at that point, this is just the server-side backstop."""
-    if GAME["round"] >= NUM_ROUNDS:
-        return
-    _set_round(GAME["round"] + 1)
-    _set_phase_by_index(PHASES.index("Secret Identity"))
 
 
 def _set_phase_by_index(idx, error_sid=None):
@@ -1437,34 +1333,25 @@ def _set_phase_by_index(idx, error_sid=None):
     if old_phase == "Inspect" and (idx is None or PHASES[idx] != "Inspect"):
         GAME["pending_inspection"] = None
         GAME["active_inspector_cid"] = None
-        GAME["inspect_responded_cids"] = []
         GAME["active_alchemist_cid"] = None
         GAME["pending_alchemy"] = None
         if GAME["active_arrester_cid"] and ARREST_INFO.get(GAME["active_arrester_cid"], {}).get("phase") == "Inspect":
             GAME["active_arrester_cid"] = None
         GAME["active_telepathy_cid"] = None
     if old_phase == "Protect" and (idx is None or PHASES[idx] != "Protect"):
-        # The Protect window has just closed - anyone still Eliminated at
-        # this point never got shielded this round (apply_shield already
-        # clears "eliminated" the moment a shield lands on them), so they
-        # automatically lose 1 health, floored at 0.
-        for cid, st in GAME["characters"].items():
-            if st["active"] and st.get("eliminated") and st.get("health") is not None:
-                old_health = st["health"]
-                st["health"] = max(0, st["health"] - 1)
-                if st["health"] < old_health:
-                    log_activity(f"{display_name_for(cid)} was Eliminated and not shielded - "
-                                 f"lost 1 health ({st['health']} remaining)")
-                    pname = (st.get("player_name") or "").strip()
-                    sid = _sid_for_player(pname) if pname else None
-                    if sid:
-                        socketio.emit("hp_lost", {"new_health": st["health"]}, room=sid)
-        GAME["active_protector_cids"] = []
-        GAME["protect_responded_cids"] = []
+        GAME["active_protector_cid"] = None
     if old_phase == "Accuse" and (idx is None or PHASES[idx] != "Accuse"):
         GAME["active_absorber_cid"] = None
         if GAME["active_arrester_cid"] and ARREST_INFO.get(GAME["active_arrester_cid"], {}).get("phase") == "Accuse":
             GAME["active_arrester_cid"] = None
+    if old_phase == "Eliminate" and (idx is None or PHASES[idx] != "Eliminate"):
+        gl_st = GAME["characters"].get("green_lantern")
+        if gl_st and gl_st["active"]:
+            gl_pname = (gl_st.get("player_name") or "").strip()
+            left, right = seat_neighbors(gl_pname) if gl_pname else (None, None)
+            for neighbor in (left, right):
+                if neighbor and neighbor not in GAME["pending_gl_reveals"]:
+                    GAME["pending_gl_reveals"].append(neighbor)
     GAME["phase_index"] = idx
     if idx is not None:
         log_activity(f"Phase: {PHASES[idx]}!")
@@ -1472,24 +1359,18 @@ def _set_phase_by_index(idx, error_sid=None):
             GAME["votes"] = {}
         if PHASES[idx] == "Protect":
             for st in GAME["characters"].values():
-                st["protection"] = [None, None, None]
-                st["shielded"] = False
-            GAME["active_protector_cids"] = []
-            GAME["protect_responded_cids"] = []
-        if PHASES[idx] == "Report" and GAME["round"] >= 3 and not GAME["super_abilities_announced"]:
-            GAME["super_abilities_announced"] = True
-            log_activity("Super Abilities are now active!")
-            for cid in super_active_characters():
-                ability = real_super_ability(cid)
-                pname = (GAME["characters"][cid].get("player_name") or "").strip().lower()
-                if not pname:
-                    continue
-                for sid, name in PLAYER_SIDS.items():
-                    if name.strip().lower() == pname:
-                        socketio.emit("super_ability_unlocked", {
-                            "character": display_name_for(cid),
-                            "ability": ability,
-                        }, room=sid)
+                st["protection"] = [False, False, False]
+        if PHASES[idx] == "Report" and GAME["pending_gl_reveals"]:
+            for pname in GAME["pending_gl_reveals"]:
+                sid = _sid_for_player(pname)
+                if sid:
+                    socketio.emit("condition_alert", {
+                        "title": "Shielded by the Light!",
+                        "body": "Green Lantern's Light automatically shielded you from "
+                                "elimination last round - you were seated right beside them.",
+                    }, room=sid)
+            log_activity(f"Green Lantern's Light reveal: {', '.join(GAME['pending_gl_reveals'])}")
+            GAME["pending_gl_reveals"] = []
     broadcast()
     push_phase_reminders()
     push_phase_guide()
@@ -1909,19 +1790,11 @@ def on_toggle_location(data):
 
 @socketio.on("toggle_protection")
 def on_toggle_protection(data):
-    """Manual host override on a protection dot. Slots now hold a protector
-    id (or None) rather than a plain boolean, since each dot shows a
-    specific protector's badge - so a click here is an undo/clear for a
-    mistaken shield, not a generic toggle. Clicking an empty dot does
-    nothing; the automated Protect-phase flow is how dots get filled."""
     cid, slot = data["id"], int(data["slot"])
     if cid in GAME["characters"] and 0 <= slot < 3:
         prot = GAME["characters"][cid]["protection"]
-        if prot[slot] is not None:
-            prot[slot] = None
-            if not any(prot):
-                GAME["characters"][cid]["shielded"] = False
-            broadcast()
+        prot[slot] = not prot[slot]
+        broadcast()
 
 
 LOYAL_COMPANION_IDS = {"krypto", "streaky"}
@@ -2022,6 +1895,7 @@ def on_character_action(data):
             st[cond["flag"]] = False
         log_activity(f"{name} deactivated")
     else:
+        st["last_action"] = action
         log_activity(f"{name}: {action.capitalize()}")
         # Track outcomes for next round's Report recap. "watchtower" =
         # reached Watchtower safely; "end" = eliminated/game over.
@@ -2029,25 +1903,16 @@ def on_character_action(data):
             GAME["round_events"]["rescued"].append(cid)
         if action == "end" and cid not in GAME["round_events"]["eliminated"]:
             GAME["round_events"]["eliminated"].append(cid)
+        # Condition toggle + private player alert, only on turning ON.
         if action in CONDITIONS:
-            # Condition-backed buttons (ELM, Expose, Watchtower, Teleport)
-            # are real on/off toggles - the button's highlight (last_action)
-            # follows the flag itself, so clicking an already-highlighted
-            # button turns it back off instead of re-lighting it forever.
             cond = CONDITIONS[action]
             st[cond["flag"]] = not st[cond["flag"]]
             if st[cond["flag"]]:
-                st["last_action"] = action
                 push_condition_alert(cid, cond["title"], cond["body"])
                 if action == "end":
                     check_spectre_transformation(cid)
                 if action == "expose":
                     announce_gadfly_exposure(cid)
-            elif st["last_action"] == action:
-                st["last_action"] = None
-        else:
-            # Non-condition actions (e.g. Hive) - simple, always-on click.
-            st["last_action"] = action
         if action == "end":
             check_house_of_el_condition()
     broadcast()
@@ -2298,6 +2163,49 @@ def seats_in_direction(player_name, direction, count=2):
     return [GAME["seats"][(idx + step * (i + 1)) % n] for i in range(max_count)]
 
 
+def two_seats_in_direction(player_name, direction):
+    """The two nearest players in the given direction ('left' or
+    'right') from player_name's seat - Plastic Man's Group Hug."""
+    return seats_in_direction(player_name, direction, count=2)
+
+
+@socketio.on("send_plastic_man_prompt")
+def on_send_plastic_man_prompt(data):
+    """Host invites Plastic Man to choose Left or Right for Group Hug -
+    no phase restriction, matches his card text."""
+    cid = data.get("id")
+    if cid != "plastic_man":
+        return
+    st = GAME["characters"].get(cid)
+    if not st or not st["active"]:
+        return
+    pname = (st.get("player_name") or "").strip()
+    sid = _sid_for_player(pname) if pname else None
+    if sid:
+        socketio.emit("plastic_man_prompt", {}, room=sid)
+    log_activity(f"{display_name_for(cid)} was invited to choose a Group Hug direction")
+    broadcast()
+
+
+@socketio.on("submit_plastic_man_choice")
+def on_submit_plastic_man_choice(data):
+    """Plastic Man's player privately picks Left or Right. The two
+    players in that direction are silently shielded - per the card,
+    they never receive any notification about it."""
+    pm_name = (data.get("plastic_man") or "").strip()
+    direction = data.get("direction")
+    if not pm_name or direction not in ("left", "right"):
+        return
+    pm_cid = find_player_character_id(pm_name)
+    if pm_cid != "plastic_man":
+        return
+    targets = two_seats_in_direction(pm_name, direction)
+    GAME["plastic_man_shielded"] = targets
+    log_activity(f"{pm_name} (Plastic Man) used Group Hug to the {direction} - "
+                 f"{', '.join(targets) if targets else 'no one (not enough seats)'} silently shielded")
+    broadcast()
+
+
 @socketio.on("send_thunder_prompt")
 def on_send_thunder_prompt(data):
     """Host invites Thunder to pick Left or Right for Stomp - Super
@@ -2507,6 +2415,12 @@ def _do_shuffle(exclude_char_ids=None):
 
 @socketio.on("shuffle_characters")
 def on_shuffle_characters():
+    if GAME["seats"] and any(not s for s in GAME["seats"]):
+        socketio.emit("shuffle_error", {
+            "message": "Some chairs are still empty from Arrange - finish seating "
+                       "everyone (or click Arrange again to start over) before shuffling characters."
+        }, room=request.sid)
+        return
     ensure_seating()
     error = _do_shuffle()
     if error:
@@ -2516,6 +2430,69 @@ def on_shuffle_characters():
     log_activity(f"Shuffled characters to {len(GAME['players'])} players")
     broadcast()
     push_phase_reminders()
+
+
+@socketio.on("start_arrange")
+def on_start_arrange():
+    """Host clicks ARRANGE - the manual alternative to letting Shuffle
+    randomize seats. Builds a fresh circle of empty, numbered seats (one
+    per locked-in player) for drag-and-drop placement, discarding whatever
+    seating existed before (same fresh-start semantics as Shuffle)."""
+    if not GAME["roster_locked"]:
+        return
+    players = [p["name"] for p in GAME["players"]]
+    if not players:
+        return
+    GAME["seats"] = ["" for _ in players]
+    log_activity(f"Host started manually arranging seats for {len(players)} players")
+    broadcast()
+
+
+@socketio.on("assign_seat")
+def on_assign_seat(data):
+    """Host drags a player's name from the Unseated Players pool (or from
+    another chair, to relocate them) onto an empty numbered chair. Only
+    ever fills a genuinely empty seat - dropping on an occupied one is a
+    no-op; the host clears it first (clear_seat) if they want to swap."""
+    name = (data.get("name") or "").strip()
+    try:
+        seat_index_val = int(data.get("seat_index"))
+    except (TypeError, ValueError):
+        return
+    if not name:
+        return
+    if not any(p["name"].strip().lower() == name.strip().lower() for p in GAME["players"]):
+        return  # not a real player in the roster
+    seats = GAME["seats"]
+    if seat_index_val < 0 or seat_index_val >= len(seats):
+        return
+    if seats[seat_index_val]:
+        return  # target chair is already occupied
+    # If this player is already seated elsewhere, relocate them rather
+    # than leaving a duplicate behind.
+    for i, occupant in enumerate(seats):
+        if occupant.strip().lower() == name.strip().lower():
+            seats[i] = ""
+    seats[seat_index_val] = name
+    log_activity(f"{name} seated in Chair {seat_index_val + 1}")
+    broadcast()
+
+
+@socketio.on("clear_seat")
+def on_clear_seat(data):
+    """Host clicks an occupied chair during Arrange to empty it again,
+    returning that player to the Unseated Players pool."""
+    try:
+        seat_index_val = int(data.get("seat_index"))
+    except (TypeError, ValueError):
+        return
+    seats = GAME["seats"]
+    if seat_index_val < 0 or seat_index_val >= len(seats):
+        return
+    if seats[seat_index_val]:
+        log_activity(f"{seats[seat_index_val]} removed from Chair {seat_index_val + 1}")
+        seats[seat_index_val] = ""
+        broadcast()
 
 
 @socketio.on("apply_difficulty_preset")
@@ -2623,9 +2600,6 @@ def on_cast_vote(data):
             return  # only White Martians (or Alchemy-made Eliminators) vote during Eliminate!
         candidates = eliminate_candidates()
     elif phase == "Vote":
-        voter_cid = find_player_character_id(voter)
-        if voter_cid and current_arrest_scope(voter_cid) == "phases":
-            return  # under Citizen's Arrest / Stomped! - may NOT Vote this round
         candidates = vote_candidates()
     else:
         return  # voting isn't open outside Vote!/Eliminate!
@@ -2664,12 +2638,7 @@ def on_send_inspect_prompt(data):
         return
     if not _visible_phase_abilities(cid, "Inspect"):
         return  # e.g. Superman's X-Ray Vision is a locked Super Ability before Round 3
-    if cid in GAME["inspect_responded_cids"]:
-        return  # already invited to ask Watchtower this phase - only once per phase
-    if GAME["active_inspector_cid"] is not None:
-        return  # someone else is already mid-question - only one live invite at a time
     GAME["active_inspector_cid"] = cid
-    GAME["inspect_responded_cids"].append(cid)
     GAME["pending_inspection"] = None
     pname = (st.get("player_name") or "").strip()
     sid = _sid_for_player(pname) if pname else None
@@ -3254,193 +3223,67 @@ def on_submit_arrest_target(data):
     broadcast()
 
 
-def _invite_protector(cid):
-    """Send this eligible protector's player their private protect_prompt
-    and mark them pending. Shared by start_protect_phase (invites the next
-    one in tier order) and resend_protect_prompt (re-send to whoever's
-    currently pending). Returns True if an invite was actually sent."""
+@socketio.on("send_protect_prompt")
+def on_send_protect_prompt(data):
+    """Host invites a specific eligible Hero to choose who to protect this
+    phase - only that character's player can submit a target until it's
+    resolved or the host moves to someone else. Also works for anyone
+    Dr. Alchemy granted Protector status to."""
+    cid = data.get("id")
     st = GAME["characters"].get(cid)
     char = CHARACTERS_BY_ID.get(cid)
     is_natural_protector = char and char.get("has_shield") and st and st.get("shield") is not None
     is_alchemy_protector = st and st.get("alchemy_type") == "protector" and st.get("shield") is not None
     if not st or not st["active"] or not (is_natural_protector or is_alchemy_protector):
-        return False
-    if is_natural_protector and not _visible_phase_abilities(cid, "Protect"):
-        return False  # locked Super Ability before Round 3
-    if cid not in GAME["active_protector_cids"]:
-        GAME["active_protector_cids"].append(cid)
-    pname = (st.get("player_name") or "").strip()
-    sid = _sid_for_player(pname) if pname else None
-    if sid:
-        if cid == "plastic_man":
-            # Group Hug isn't a named-target pick - it's Left-side/Right-
-            # side, silently shielding the two nearest seated players in
-            # that direction (see submit_plastic_man_choice).
-            socketio.emit("plastic_man_prompt", {}, room=sid)
-        else:
-            candidates = active_player_names(exclude_name=None if can_self_protect(cid) else pname)
-            socketio.emit("protect_prompt", {
-                "candidates": candidates,
-                "can_self_protect": can_self_protect(cid),
-            }, room=sid)
-    return True
-
-
-@socketio.on("start_protect_phase")
-def on_start_protect_phase():
-    """Invites the NEXT eligible, not-yet-responded protector in priority-
-    tier order (Green Lantern & Plastic Man first, then Flash, then the
-    Super-family, then everyone else) - one at a time, not all at once.
-    Host clicks this again after each protector resolves to advance to the
-    next one in line. Does nothing if someone is already pending (resolve
-    them first) or if the queue is empty."""
+        return
     phase = PHASES[GAME["phase_index"]] if GAME["phase_index"] is not None else None
     if phase != "Protect":
         return
-    if GAME["active_protector_cids"]:
-        return  # someone's already up - resolve them (submit/skip) first
-    queue = protect_queue()
-    if not queue:
-        log_activity("Protect phase - no eligible protectors left to invite")
-        broadcast()
-        return
-    next_cid = queue[0]["id"]
-    if _invite_protector(next_cid):
-        log_activity(f"Invited {display_name_for(next_cid)} (Tier {protect_tier(next_cid)}) to choose someone to protect")
-    broadcast()
-
-
-@socketio.on("resend_protect_prompt")
-def on_resend_protect_prompt(data):
-    """Host re-sends the prompt to one still-pending protector (e.g. their
-    phone missed the first push) without touching anyone else."""
-    cid = data.get("id")
-    if not cid or cid not in GAME["active_protector_cids"]:
-        return
-    _invite_protector(cid)
-    log_activity(f"Re-sent the protect prompt to {display_name_for(cid)}")
-    broadcast()
-
-
-@socketio.on("skip_protector")
-def on_skip_protector(data):
-    """Host marks a still-pending protector as done without them choosing
-    anyone (e.g. their player stepped away), so the phase isn't stuck
-    waiting on them."""
-    cid = data.get("id")
-    if not cid or cid not in GAME["active_protector_cids"]:
-        return
-    GAME["active_protector_cids"].remove(cid)
-    if cid not in GAME["protect_responded_cids"]:
-        GAME["protect_responded_cids"].append(cid)
-    log_activity(f"{display_name_for(cid)} was skipped for this Protect phase")
+    if is_natural_protector and not _visible_phase_abilities(cid, "Protect"):
+        return  # locked Super Ability before Round 3
+    GAME["active_protector_cid"] = cid
+    pname = (st.get("player_name") or "").strip()
+    sid = _sid_for_player(pname) if pname else None
+    if sid:
+        candidates = active_player_names(exclude_name=None if can_self_protect(cid) else pname)
+        socketio.emit("protect_prompt", {
+            "candidates": candidates,
+            "can_self_protect": can_self_protect(cid),
+        }, room=sid)
+    log_activity(f"{display_name_for(cid)} was invited to choose someone to protect")
     broadcast()
 
 
 @socketio.on("submit_protect_target")
 def on_submit_protect_target(data):
-    """A protector's player privately submits who they want to protect.
-
-    Tier conflict rules (a character can only ever be shielded once per
-    round now): if the target is already shielded by someone from a
-    STRICTLY higher-priority tier (they necessarily went earlier, since
-    the queue is invited in tier order), this protector is blocked and
-    stays pending - they're told to pick someone else, and get their
-    candidate list back immediately without waiting on the host. If the
-    target is already shielded by a SAME-tier protector (e.g. Green
-    Lantern then Plastic Man both pick the same person), it's purely
-    informational - not blocking - and this submission still counts as
-    their turn."""
+    """A Hero's player privately submits who they want to protect. Fills
+    the first open protection slot for that target. If the target already
+    has all 3 slots full this round, the Hero is never told - only the
+    host sees a notification, per the game's silent-protector design."""
     protector_name = (data.get("protector") or "").strip()
     target_name = (data.get("target_name") or "").strip()
     if not protector_name or not target_name:
         return
     protector_cid = find_player_character_id(protector_name)
-    if not protector_cid or protector_cid not in GAME["active_protector_cids"]:
-        return  # this character isn't currently invited to protect
+    if not protector_cid or protector_cid != GAME["active_protector_cid"]:
+        return  # host hasn't invited this character to protect right now
     target_cid = find_player_character_id(target_name)
     if not target_cid or not GAME["characters"][target_cid]["active"]:
         return
-
+    GAME["active_protector_cid"] = None
+    target_st = GAME["characters"][target_cid]
     protector_display = display_name_for(protector_cid)
     target_display = display_name_for(target_cid)
-    existing_cid = existing_protector_of(target_cid)
-
-    if existing_cid and existing_cid != protector_cid:
-        existing_name = display_name_for(existing_cid)
-        if protect_tier(existing_cid) < protect_tier(protector_cid):
-            # Strictly higher priority already claimed this target - blocked.
-            # Stays pending; player gets an immediate re-pick, no host step needed.
-            sid = _sid_for_player(protector_name)
-            if sid:
-                socketio.emit("protect_target_rejected", {
-                    "message": f"{target_display} is already shielded by {existing_name}. Choose someone else.",
-                    "candidates": active_player_names(exclude_name=None if can_self_protect(protector_cid) else protector_name),
-                    "can_self_protect": can_self_protect(protector_cid),
-                }, room=sid)
-            log_activity(f"{protector_display} tried to shield {target_display}, but {existing_name} "
-                         f"(higher priority) already did - asked to pick someone else")
-            broadcast()
-            return
-        else:
-            # Same tier - informational only, doesn't block. Turn is used.
-            GAME["active_protector_cids"].remove(protector_cid)
-            if protector_cid not in GAME["protect_responded_cids"]:
-                GAME["protect_responded_cids"].append(protector_cid)
-            sid = _sid_for_player(protector_name)
-            if sid:
-                socketio.emit("condition_alert", {
-                    "title": "Already Protected",
-                    "body": f"{existing_name} already shielded {target_display} this round - "
-                            f"no action needed from you.",
-                }, room=sid)
-            log_activity(f"{protector_display} picked {target_display}, but {existing_name} (same tier) "
-                         f"already shielded them - informational only")
-            broadcast()
-            return
-
-    GAME["active_protector_cids"].remove(protector_cid)
-    if protector_cid not in GAME["protect_responded_cids"]:
-        GAME["protect_responded_cids"].append(protector_cid)
-    apply_shield(target_cid, protector_cid)
-    broadcast()
-
-
-@socketio.on("submit_plastic_man_choice")
-def on_submit_plastic_man_choice(data):
-    """Plastic Man's player privately picks Left-side or Right-side for
-    Group Hug. Per his card, this silently shields the two players seated
-    nearest him in that direction (per the live seating chart) - they're
-    never told, unlike every other protector's target. Uses the same
-    tier-queue bookkeeping (active/responded) as submit_protect_target so
-    the host wizard advances normally afterward."""
-    pm_name = (data.get("plastic_man") or "").strip()
-    direction = data.get("direction")
-    if not pm_name or direction not in ("left", "right"):
-        return
-    pm_cid = find_player_character_id(pm_name)
-    if not pm_cid or pm_cid != "plastic_man" or pm_cid not in GAME["active_protector_cids"]:
-        return  # Plastic Man isn't currently invited to protect
-
-    target_names = seats_in_direction(pm_name, direction, count=2)
-    shielded = []
-    for target_name in target_names:
-        target_cid = find_player_character_id(target_name)
-        if target_cid and GAME["characters"].get(target_cid, {}).get("active"):
-            if apply_shield(target_cid, pm_cid, notify=False):
-                shielded.append(target_name)
-
-    GAME["active_protector_cids"].remove(pm_cid)
-    if pm_cid not in GAME["protect_responded_cids"]:
-        GAME["protect_responded_cids"].append(pm_cid)
-
-    side = f"{direction}-side"
-    if shielded:
-        log_activity(f"Plastic Man used Group Hug ({side}) - silently shielded "
-                     f"{' and '.join(shielded)}")
+    if False in target_st["protection"]:
+        target_st["protection"][target_st["protection"].index(False)] = True
+        log_activity(f"{protector_display} protected {target_display}")
     else:
-        log_activity(f"Plastic Man used Group Hug ({side}) - not enough seated "
-                     f"players in that direction to shield anyone")
+        socketio.emit("character_limit_error", {
+            "message": f"{protector_display} tried to protect {target_display}, but "
+                       f"their protection is already full this round. {protector_display}'s "
+                       f"player was not told this failed."
+        }, room="hosts")
+        log_activity(f"{protector_display} tried to protect {target_display} - already full")
     broadcast()
 
 
@@ -3552,9 +3395,7 @@ def on_new_game():
     GAME["game_over"] = None
     GAME["pending_inspection"] = None
     GAME["active_inspector_cid"] = None
-    GAME["inspect_responded_cids"] = []
-    GAME["active_protector_cids"] = []
-    GAME["protect_responded_cids"] = []
+    GAME["active_protector_cid"] = None
     GAME["lobo_tracker"] = {"civilian": 0, "hero": 0, "martian": 0}
     GAME["active_absorber_cid"] = None
     GAME["active_alchemist_cid"] = None
@@ -3566,6 +3407,8 @@ def on_new_game():
     GAME["active_telepathy_cid"] = None
     GAME["telepathic_links"] = {"martian_manhunter": [], "miss_martian": []}
     GAME["liar_decoys"] = {}
+    GAME["pending_gl_reveals"] = []
+    GAME["plastic_man_shielded"] = []
     GAME["spectre_triggered"] = False
     # Player roster is left exactly as the host set it up via the New Game
     # dialog (remove/add/remove-all) - no automatic repopulation here.
