@@ -199,6 +199,21 @@ body{
 .host-page .led-phase[data-phase="7"]{ border-color: #c084fc55; }
 .host-page .led-phase[data-phase="8"]{ border-color: #ff8a5c55; }
 
+.next-phase-btn{
+  height: 30px; padding: 0 12px; margin-right: 6px;
+  border-radius: 3px; border: 1px solid var(--amber);
+  background: rgba(245,166,35,.12); color: var(--amber);
+  font-family:'Rajdhani',sans-serif; font-weight:700; font-size: 11px;
+  letter-spacing:.06em; text-transform: uppercase;
+  cursor: pointer; transition: all .15s ease; white-space: nowrap;
+}
+.next-phase-btn:hover:not(:disabled){
+  background: var(--amber); color: #1a1305; box-shadow: 0 0 12px rgba(245,166,35,.55);
+}
+.next-phase-btn:disabled{
+  opacity: .35; cursor: not-allowed; border-color: var(--line); background: none; color: var(--muted);
+}
+
 /* ---------- layout ---------- */
 .layout{ display:grid; grid-template-columns: 1fr 300px; gap: 16px; padding: 16px 20px; }
 @media (max-width: 900px){ .layout{ grid-template-columns: 1fr; } }
@@ -409,6 +424,7 @@ body{
 .condition-rescued{ color: var(--alive); border: 1px solid var(--alive); background: rgba(79,201,126,.10); }
 .condition-targeted{ color: #ff8a5c; border: 1px solid #ff8a5c; background: rgba(255,138,92,.10); }
 .condition-arrested{ color: #e5484d; border: 1px solid #e5484d; background: rgba(229,72,77,.12); }
+.condition-shielded{ color: #2dd4ff; border: 1px solid #2dd4ff; background: rgba(45,212,255,.10); }
 .hostage-modal{ max-width: 440px; }
 .hostage-target-list{ display:flex; flex-direction:column; gap:6px; max-height: 260px; overflow-y:auto; }
 .hostage-target{
@@ -445,6 +461,8 @@ body{
 .action-btn:hover{ border-color: var(--amber); color: var(--text); }
 .action-btn.sel{ background: var(--amber); color:#1a1305; border-color: var(--amber); }
 .action-btn.deactivate:hover{ border-color: var(--down); color: var(--down); }
+.action-btn:disabled{ opacity:.4; cursor:not-allowed; }
+.action-btn:disabled:hover{ border-color: var(--line); color: var(--muted); }
 
 .prot-wrap{ display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
 .prot-label{
@@ -453,12 +471,20 @@ body{
 }
 .prot-row{ display:flex; gap:4px; }
 .prot-dot{
-  width:15px; height:15px; border-radius:50%;
+  width:19px; height:19px; border-radius:50%;
   border: 2.5px solid var(--muted);
   cursor:pointer; background:transparent;
   box-sizing: border-box;
+  display:flex; align-items:center; justify-content:center;
+  font-size: 11px; line-height:1; font-weight:800;
+  font-family:'Rajdhani', sans-serif;
+  transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
 }
+/* Fallback (protector badge not resolved yet) - matches the old generic look */
 .prot-dot.on{ background: var(--amber); border-color: var(--amber); box-shadow: 0 0 6px rgba(245,166,35,.6); }
+/* When a protector badge is applied inline (background/color set via JS),
+   still show a matching soft glow so a filled dot reads clearly at a glance. */
+.prot-dot.on[style*="background"]{ box-shadow: 0 0 6px rgba(255,255,255,.35); border-color: transparent; }
 
 /* ---------- steppers (health / shield) ---------- */
 .stepper{
@@ -549,6 +575,24 @@ body{
 }
 .ability-title{ font-weight:700; font-size:14px; margin: 1px 0 2px; }
 .ability-desc{ font-size:13px; color: var(--text); opacity:.85; line-height:1.4; }
+.goals-list{ margin: 12px 0 0; padding-left: 20px; font-size:13px; color: var(--text); opacity:.9; line-height:1.6; }
+.goals-list li{ margin-bottom: 8px; }
+.alerts-badge{
+  position: absolute; top: -6px; right: -6px;
+  background: var(--amber, #f5b942); color: #1a1305;
+  font-size: 11px; font-weight: 800; line-height: 1;
+  min-width: 16px; height: 16px; padding: 2px 4px;
+  border-radius: 999px; text-align: center;
+}
+.alert-log-item{
+  padding: 10px 12px; margin-bottom: 8px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px; cursor: pointer; transition: background .15s ease;
+}
+.alert-log-item:hover{ background: rgba(255,255,255,.09); }
+.alert-log-time{ font-size:11px; color: var(--muted); margin-bottom: 2px; }
+.alert-log-title{ font-size:14px; font-weight:700; color: var(--text); }
+.alert-log-sub{ font-size:12px; color: var(--text); opacity:.8; margin-top:2px; }
 .type-tag{
   display:inline-flex; align-items:center; justify-content:center;
   width:16px; height:16px; border-radius:4px; font-size:10px; font-weight:800;
@@ -579,6 +623,33 @@ body{
 }
 .step-nav-buttons{ display: flex; gap: 8px; }
 .step-nav-buttons button:disabled{ opacity: .3; cursor: not-allowed; }
+.protect-pending-list{ display:flex; flex-direction:column; gap:6px; }
+.protect-pending-row{
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel-raised); font-size: 13px; font-style: normal;
+}
+.protect-pending-actions{ display:flex; gap:6px; }
+
+.protect-tier-list{ display:flex; flex-direction:column; gap:10px; }
+.protect-tier-group{
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  background: var(--panel-raised);
+}
+.protect-tier-label{
+  font-family:'Rajdhani', sans-serif; font-weight:700; font-size:11px;
+  letter-spacing:.08em; text-transform:uppercase; color: var(--amber);
+  margin-bottom: 6px;
+}
+.protect-tier-row{
+  display:flex; align-items:center; gap:8px; font-size: 13px; font-style: normal;
+  padding: 3px 0; color: var(--text);
+}
+.protect-tier-icon{ width: 16px; text-align:center; flex-shrink:0; font-size: 12px; }
+.protect-status-done{ color: var(--muted); }
+.protect-status-done .protect-tier-icon{ color: var(--alive); }
+.protect-status-pending .protect-tier-icon{ color: var(--amber); }
+.protect-status-waiting{ opacity: .65; }
 .intro-text{ white-space: pre-line; line-height: 1.5; }
 .prompt-tag{
   font-family:'Rajdhani',sans-serif; font-size:9px; text-transform:uppercase;
@@ -588,19 +659,29 @@ body{
 .prompt-deprecated{ opacity:.5; border-left-color: var(--muted); }
 .prompt-deprecated .ability-title{ text-decoration: line-through; }
 
-/* ---------- Discuss! timer ---------- */
-.timer-modal{
-  background: var(--panel); border:1px solid var(--line); border-radius:10px;
-  padding: 22px; width: 300px; max-width: 90vw; text-align:center;
+/* ---------- Discuss! timer - persistent, upper-right, never an overlay ---------- */
+.host-persistent-timer{
+  position: fixed; top: 12px; right: 16px; z-index: 600;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel); border: 1px solid var(--amber); border-radius: 8px;
+  padding: 6px 10px; box-shadow: 0 4px 16px rgba(0,0,0,.35);
 }
-.timer-display{
-  font-size: 56px; font-weight:700; letter-spacing:.04em; color: var(--text);
-  padding: 20px 0; margin: 6px 0 14px;
+.host-timer-label{
+  font-family:'Rajdhani', sans-serif; font-weight:700; letter-spacing:.06em;
+  text-transform: uppercase; font-size: 11px; color: var(--amber);
 }
-.timer-display.time-up{ color: var(--down); animation: pulse 1s infinite; }
+.host-timer-display{
+  font-size: 18px; font-weight: 700; color: var(--text); min-width: 52px; text-align:center;
+}
+.host-timer-display.time-up{ color: var(--down); animation: pulse 1s infinite; }
 @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.4; } }
-.timer-controls{ display:flex; gap:8px; }
-.timer-controls .btn-ghost{ margin-top:0; }
+.host-timer-btn{
+  border: 1px solid var(--line); background: #0d131c; color: var(--muted);
+  border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer;
+  transition: all .15s ease;
+}
+.host-timer-btn:hover{ border-color: var(--amber); color: var(--text); }
+.host-timer-close{ font-size: 14px; padding: 4px 8px; }
 
 /* ---------- side panels ---------- */
 .feed-item{ font-size:12px; color: var(--muted); padding: 3px 0; border-bottom: 1px dotted var(--line); }
@@ -679,9 +760,6 @@ body{
 }
 .chair-seat.occupied:hover{
   border-color: var(--down); box-shadow: 0 0 10px rgba(239,85,104,.4);
-}
-.chair-seat.gl-shielded{
-  border-color: #2dd4ff; box-shadow: 0 0 10px rgba(45,212,255,.45);
 }
 .chair-seat-num{
   position: absolute; top: -6px; left: -6px;

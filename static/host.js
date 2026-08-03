@@ -231,7 +231,6 @@ function renderSeatingDiagram(state) {
   const cy = topPad + radius;
   const containerH = cy + radius + seatR + 16;
   const n = seats.length;
-  const glNeighbors = new Set((state.green_lantern_neighbors || []).map(x => x.toLowerCase()));
 
   const wrap = document.createElement("div");
   wrap.className = "seat-circle";
@@ -246,9 +245,8 @@ function renderSeatingDiagram(state) {
     const angle = (2 * Math.PI * i) / n - Math.PI / 2;
     const x = cx + radius * Math.cos(angle);
     const y = cy + radius * Math.sin(angle);
-    const isGlShielded = !!name && glNeighbors.has(name.toLowerCase());
     const chair = document.createElement("div");
-    chair.className = "chair-seat " + (name ? "occupied" : "empty") + (isGlShielded ? " gl-shielded" : "");
+    chair.className = "chair-seat " + (name ? "occupied" : "empty");
     chair.style.left = x + "px";
     chair.style.top = y + "px";
     chair.style.width = chair.style.height = (seatR * 2) + "px";
@@ -257,9 +255,7 @@ function renderSeatingDiagram(state) {
       <span class="chair-seat-num">${i + 1}</span>
       ${name ? `<span class="chair-seat-name">${seatInitials(name)}</span>` : ""}
     `;
-    chair.title = name
-      ? `Chair ${i + 1}: ${name}${isGlShielded ? " (Green Lantern's Light)" : ""} - click to remove`
-      : `Chair ${i + 1} - empty`;
+    chair.title = name ? `Chair ${i + 1}: ${name} - click to remove` : `Chair ${i + 1} - empty`;
 
     if (name) {
       chair.draggable = true;
@@ -406,6 +402,19 @@ for (let i = 1; i <= NUM_ROUNDS; i++) {
 
 const phaseStrip = document.getElementById("phase-strip");
 PHASES.forEach((p, idx) => {
+  if (p === "Inspect") {
+    const nextBtn = document.createElement("button");
+    nextBtn.id = "next-phase-btn";
+    nextBtn.className = "next-phase-btn";
+    nextBtn.type = "button";
+    nextBtn.textContent = "Next Phase ▶";
+    nextBtn.title = "End this round and jump straight into the next round's Secret Identity phase";
+    nextBtn.onclick = () => {
+      if (latestState && latestState.round >= NUM_ROUNDS) return;
+      socket.emit("advance_round");
+    };
+    phaseStrip.appendChild(nextBtn);
+  }
   const el = document.createElement("div");
   el.className = "led led-phase";
   el.textContent = p;
@@ -612,15 +621,6 @@ function buildCharRow(c) {
     controls.appendChild(mapBtn);
   }
 
-  if (c.id === "plastic_man") {
-    const groupHugBtn = document.createElement("button");
-    groupHugBtn.className = "action-btn reveal-btn";
-    groupHugBtn.title = "Let Plastic Man choose Left or Right to silently shield two players";
-    groupHugBtn.textContent = "Send Group Hug Prompt";
-    groupHugBtn.onclick = () => socket.emit("send_plastic_man_prompt", { id: c.id });
-    controls.appendChild(groupHugBtn);
-  }
-
   if (c.id === "beast_boy") {
     const giraffeBtn = document.createElement("button");
     giraffeBtn.className = "action-btn reveal-btn";
@@ -669,12 +669,49 @@ function buildCharRow(c) {
   }
 
   if (["martian_manhunter", "miss_martian"].includes(c.id)) {
+    const respondedTelepathicIds = new Set((latestState && latestState.telepathic_responded_cids) || []);
+    const activeTelepathyId = latestState && latestState.active_telepathy_cid;
+    const eligibleTelepathicIds = ((latestState && latestState.eligible_telepathic_characters) || []).map(e => e.id);
+    const telepathyIsActive = activeTelepathyId === c.id;
+    const telepathyAlreadyAsked = respondedTelepathicIds.has(c.id);
+    const someoneElseTelepathyActive = activeTelepathyId != null && !telepathyIsActive;
+    const mmMustGoFirst = c.id === "miss_martian"
+      && eligibleTelepathicIds.includes("martian_manhunter")
+      && !respondedTelepathicIds.has("martian_manhunter");
+
     const linkBtn = document.createElement("button");
     linkBtn.className = "action-btn reveal-btn";
-    linkBtn.title = "Send a list of active players to Telepathically Link with (Inspect! phase only)";
-    linkBtn.textContent = "Send Telepathic Link Prompt";
-    linkBtn.onclick = () => socket.emit("send_telepathic_link_prompt", { id: c.id });
+    if (telepathyIsActive) {
+      linkBtn.title = "Waiting for this player to silently choose a Telepathic Link target";
+      linkBtn.textContent = "Link Pending…";
+      linkBtn.disabled = true;
+    } else if (telepathyAlreadyAsked) {
+      linkBtn.title = "This character has already been asked about a Telepathic Link this phase";
+      linkBtn.textContent = "Already Asked";
+      linkBtn.disabled = true;
+    } else if (someoneElseTelepathyActive) {
+      linkBtn.title = "Another character is currently mid-Telepathic-Link - finish that one first";
+      linkBtn.textContent = "Send Telepathic Link Prompt";
+      linkBtn.disabled = true;
+    } else if (mmMustGoFirst) {
+      linkBtn.title = "Martian Manhunter must be asked before Miss Martian";
+      linkBtn.textContent = "Send Telepathic Link Prompt";
+      linkBtn.disabled = true;
+    } else {
+      linkBtn.title = "Send a list of active players to Telepathically Link with (Inspect! phase only)";
+      linkBtn.textContent = "Send Telepathic Link Prompt";
+      linkBtn.onclick = () => socket.emit("send_telepathic_link_prompt", { id: c.id });
+    }
     controls.appendChild(linkBtn);
+
+    if (telepathyIsActive) {
+      const skipTelepathyBtn = document.createElement("button");
+      skipTelepathyBtn.className = "action-btn reveal-btn";
+      skipTelepathyBtn.title = "Skip this character's Telepathic Link for this phase";
+      skipTelepathyBtn.textContent = "Skip";
+      skipTelepathyBtn.onclick = () => socket.emit("skip_telepathic", { id: c.id });
+      controls.appendChild(skipTelepathyBtn);
+    }
 
     const teamBtn = document.createElement("button");
     teamBtn.className = "action-btn reveal-btn";
@@ -755,6 +792,14 @@ socket.on("state", (state) => {
   document.querySelectorAll("#phase-strip .led").forEach(el => {
     el.classList.toggle("on", Number(el.dataset.phase) === state.phase_index);
   });
+  const nextPhaseBtn = document.getElementById("next-phase-btn");
+  if (nextPhaseBtn) {
+    const atLastRound = state.round >= NUM_ROUNDS;
+    nextPhaseBtn.disabled = atLastRound;
+    nextPhaseBtn.title = atLastRound
+      ? "Round 7 is the final round - start a new game to go further"
+      : `End Round ${state.round} and jump straight into Round ${state.round + 1}'s Secret Identity phase`;
+  }
 
   if (state.phase_index !== lastSeenPhaseIndex) {
     if (state.phase_index !== null && state.phase_script) {
@@ -894,6 +939,25 @@ socket.on("state", (state) => {
       }
     });
 
+    // Shielded isn't tied to an action button like the others above - it's
+    // set automatically by apply_shield() (Protect phase, Green Lantern,
+    // Plastic Man) and clears when protection dots reset or get manually
+    // cleared. If it just negated an Eliminated status, the ☠️ badge above
+    // has already been removed this same render since st.eliminated is now
+    // false, so this reads as ELIMINATED -> SHIELDED.
+    let shieldedBadge = row.querySelector(".condition-badge.condition-shielded");
+    if (st.shielded) {
+      if (!shieldedBadge) {
+        shieldedBadge = document.createElement("span");
+        shieldedBadge.className = "condition-badge condition-shielded";
+        shieldedBadge.title = "Protected this round - clears when protection resets next Protect phase";
+        shieldedBadge.textContent = "🛡️ Shielded";
+        row.querySelector(".char-name").appendChild(shieldedBadge);
+      }
+    } else if (shieldedBadge) {
+      shieldedBadge.remove();
+    }
+
     const isArrested = st.arrested_scope && st.arrested_for_round === state.round;
     let arrestBadge = row.querySelector(".condition-badge.condition-arrested");
     if (isArrested) {
@@ -934,7 +998,26 @@ socket.on("state", (state) => {
       b.classList.toggle("sel", !!st[b.dataset.field]);
     });
 
-    row.querySelectorAll(".prot-dot").forEach(d => d.classList.toggle("on", st.protection[d.dataset.slot]));
+    row.querySelectorAll(".prot-dot").forEach(d => {
+      const protectorCid = st.protection[d.dataset.slot];
+      d.classList.toggle("on", !!protectorCid);
+      if (protectorCid) {
+        const icon = PROTECTOR_ICONS[protectorCid] || DEFAULT_PROTECTOR_ICON;
+        const protectorSt = state.characters[protectorCid];
+        const protectorName = (protectorSt && protectorSt.display_name) || protectorCid;
+        d.style.background = icon.bg;
+        d.style.color = icon.fg;
+        d.style.borderColor = "transparent";
+        d.textContent = icon.glyph;
+        d.title = `Shielded by ${protectorName} - click to clear`;
+      } else {
+        d.style.background = "";
+        d.style.color = "";
+        d.style.borderColor = "";
+        d.textContent = "";
+        d.title = TOOLTIPS.protDot;
+      }
+    });
     row.querySelectorAll(".action-btn:not(.special-btn)").forEach(b => b.classList.toggle("sel", st.last_action === b.dataset.action));
   });
 
@@ -1386,19 +1469,19 @@ function openTimer(startSeconds, label) {
   timerSeconds = startSeconds;
   timerBeeped = false;
   timerLabel = label || "Discuss!";
-  document.getElementById("timer-title").textContent = timerLabel;
+  document.getElementById("host-timer-label").textContent = timerLabel;
+  document.getElementById("host-persistent-timer").style.display = "flex";
   renderTimer();
-  showOverlay("timer-overlay");
   startTimerInterval();
 }
 
 function renderTimer() {
   const m = Math.floor(Math.max(timerSeconds, 0) / 60);
   const s = Math.max(timerSeconds, 0) % 60;
-  const display = document.getElementById("timer-display");
+  const display = document.getElementById("host-timer-display");
   display.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   display.classList.toggle("time-up", timerSeconds <= 0);
-  document.getElementById("timer-toggle-btn").textContent = timerRunning ? "Pause" : "Resume";
+  document.getElementById("host-timer-toggle-btn").textContent = timerRunning ? "Pause" : "Resume";
   socket.emit("sync_timer", { label: timerLabel, remaining: timerSeconds, running: timerRunning });
 }
 
@@ -1441,7 +1524,7 @@ function adjustTimer(deltaSeconds) {
 function closeTimer() {
   clearInterval(timerHandle);
   timerRunning = false;
-  hideOverlay("timer-overlay");
+  document.getElementById("host-persistent-timer").style.display = "none";
   socket.emit("sync_timer", { label: null, remaining: 0, running: false });
 }
 
@@ -1589,7 +1672,6 @@ let lastStepsPhase = null;
 let stepIndex = 0;
 let inspectStepIndex = 0;
 let lastInspectPhase = null;
-let protectStepIndex = 0;
 let lastProtectPhase = null;
 
 function renderPhaseScriptBody(script) {
@@ -1606,10 +1688,7 @@ function renderPhaseScriptBody(script) {
     renderInspectWizard();
   } else if (script.kind === "interactive" && script.phase === "Protect") {
     lastInspectPhase = null;
-    if (script.phase !== lastProtectPhase) {
-      lastProtectPhase = script.phase;
-      protectStepIndex = 0;
-    }
+    lastProtectPhase = script.phase;
     renderProtectWizard();
   } else if (script.kind === "steps" && script.lines.length > 1) {
     lastInspectPhase = null;
@@ -1639,6 +1718,11 @@ function renderPhaseScriptBody(script) {
   }
 }
 
+function protectorTier(cid) {
+  return PROTECTOR_TIERS[cid] !== undefined ? PROTECTOR_TIERS[cid] : DEFAULT_PROTECTOR_TIER;
+}
+const _CHAR_ORDER = Object.fromEntries(CHARACTERS.map((c, i) => [c.id, i]));
+
 function renderProtectWizard() {
   const linesEl = document.getElementById("phase-script-lines");
   const protectors = (latestState && latestState.eligible_protectors) || [];
@@ -1647,42 +1731,66 @@ function renderProtectWizard() {
     linesEl.innerHTML = `<div class="phase-script-line" style="opacity:.6">No active character currently has a Protect/Shield ability.</div>`;
     return;
   }
-  if (protectStepIndex >= protectors.length) protectStepIndex = protectors.length - 1;
-  const current = protectors[protectStepIndex];
-  const isFirst = protectStepIndex === 0;
-  const isLast = protectStepIndex >= protectors.length - 1;
-  const invitedId = latestState.active_protector_cid;
-  const currentIsInvited = invitedId === current.id;
 
-  let bodyHtml;
-  if (currentIsInvited) {
-    bodyHtml = `<div class="phase-script-line" style="opacity:.8">Waiting for ${current.name} to silently choose someone to protect&hellip;</div>`;
-  } else {
-    const selfNote = current.can_self_protect
-      ? " (may choose themselves)"
-      : "";
-    bodyHtml = `
-      <div class="phase-script-line">${current.name} may choose one player to shield this round${selfNote}.</div>
-      <button class="btn-primary" style="margin-top:10px" onclick="socket.emit('send_protect_prompt', {id: '${current.id}'})">Send Protect Prompt</button>
+  const pendingIds = new Set((latestState && latestState.active_protector_cids) || []);
+  const respondedIds = new Set((latestState && latestState.protect_responded_cids) || []);
+
+  // Same tier/roster-order sort the backend uses for its queue, so "next
+  // up" here always matches who Start/Invite Next will actually invite.
+  const sorted = [...protectors].sort((a, b) => {
+    const ta = protectorTier(a.id), tb = protectorTier(b.id);
+    if (ta !== tb) return ta - tb;
+    return (_CHAR_ORDER[a.id] || 0) - (_CHAR_ORDER[b.id] || 0);
+  });
+  const nextUp = sorted.find(p => !pendingIds.has(p.id) && !respondedIds.has(p.id));
+  const pending = sorted.find(p => pendingIds.has(p.id));
+
+  // Group by tier for the status list.
+  const byTier = {};
+  sorted.forEach(p => {
+    const t = protectorTier(p.id);
+    (byTier[t] = byTier[t] || []).push(p);
+  });
+
+  const statusFor = (p) => {
+    if (respondedIds.has(p.id)) return { icon: "✓", cls: "protect-status-done" };
+    if (pendingIds.has(p.id)) return { icon: "⏳", cls: "protect-status-pending" };
+    return { icon: "—", cls: "protect-status-waiting" };
+  };
+
+  let html = `<div class="protect-tier-list">`;
+  Object.keys(byTier).sort((a, b) => a - b).forEach(tier => {
+    html += `
+      <div class="protect-tier-group">
+        <div class="protect-tier-label">Tier ${tier}</div>
+        ${byTier[tier].map(p => {
+          const s = statusFor(p);
+          return `<div class="protect-tier-row ${s.cls}"><span class="protect-tier-icon">${s.icon}</span>${p.name}</div>`;
+        }).join("")}
+      </div>
     `;
+  });
+  html += `</div>`;
+
+  if (pending) {
+    html += `
+      <div class="phase-script-line" style="margin-top:12px; opacity:.85">Waiting for ${pending.name} to silently choose someone to protect&hellip;</div>
+      <div class="protect-pending-actions" style="margin-top:6px">
+        <button class="btn-ghost" style="width:auto;padding:5px 10px;font-size:12px" onclick="socket.emit('resend_protect_prompt', {id: '${pending.id}'})">Resend</button>
+        <button class="btn-ghost" style="width:auto;padding:5px 10px;font-size:12px" onclick="socket.emit('skip_protector', {id: '${pending.id}'})">Skip</button>
+      </div>
+    `;
+  } else if (nextUp) {
+    html += `
+      <button class="btn-primary" style="margin-top:12px" onclick="socket.emit('start_protect_phase')">
+        Invite Next: ${nextUp.name} (Tier ${protectorTier(nextUp.id)})
+      </button>
+    `;
+  } else {
+    html += `<div class="phase-script-line" style="opacity:.6; margin-top:10px">All eligible protectors have acted this phase.</div>`;
   }
 
-  linesEl.innerHTML = `
-    ${bodyHtml}
-    <div class="step-nav">
-      <span class="step-nav-count">${protectStepIndex + 1} of ${protectors.length}</span>
-      <div class="step-nav-buttons">
-        <button class="btn-ghost" style="width:auto" onclick="stepProtect(-1)" ${isFirst ? "disabled" : ""}>&larr; Back</button>
-        <button class="btn-ghost" style="width:auto" onclick="stepProtect(1)" ${isLast ? "disabled" : ""}>Next &rarr;</button>
-      </div>
-    </div>
-  `;
-}
-
-function stepProtect(delta) {
-  const protectors = (latestState && latestState.eligible_protectors) || [];
-  protectStepIndex = Math.max(0, Math.min(protectors.length - 1, protectStepIndex + delta));
-  renderProtectWizard();
+  linesEl.innerHTML = html;
 }
 
 function renderInspectWizard() {
@@ -1700,8 +1808,11 @@ function renderInspectWizard() {
 
   const pending = latestState.pending_inspection;
   const invitedId = latestState.active_inspector_cid;
+  const respondedIds = latestState.inspect_responded_cids || [];
   const currentCharState = latestState.characters[current.id];
   const currentIsInvited = invitedId === current.id;
+  const currentAlreadyAsked = respondedIds.includes(current.id) && !currentIsInvited;
+  const someoneElseInvited = invitedId !== null && invitedId !== undefined && !currentIsInvited;
 
   let bodyHtml;
   if (currentIsInvited && pending) {
@@ -1722,6 +1833,10 @@ function renderInspectWizard() {
     `;
   } else if (currentIsInvited) {
     bodyHtml = `<div class="phase-script-line" style="opacity:.8">Waiting for ${current.name} to silently pick someone to inspect&hellip;</div>`;
+  } else if (currentAlreadyAsked) {
+    bodyHtml = `<div class="phase-script-line" style="opacity:.6">${current.name} has already asked Watchtower a question this phase.</div>`;
+  } else if (someoneElseInvited) {
+    bodyHtml = `<div class="phase-script-line" style="opacity:.6">Another character is currently mid-question - finish that one first.</div>`;
   } else {
     bodyHtml = `
       <div class="phase-script-line">${current.name} may silently ask Watchtower if another player is a White Martian.</div>
