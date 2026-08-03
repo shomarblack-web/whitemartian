@@ -1032,7 +1032,8 @@ def push_my_votes():
         choice = GAME["votes"].get(name)
         can_vote = False
         if phase == "Vote":
-            can_vote = True
+            cid = find_player_character_id(name)
+            can_vote = not (cid and current_arrest_scope(cid) == "phases")
         elif phase == "Eliminate":
             cid = find_player_character_id(name)
             can_vote = bool(cid) and (
@@ -1365,10 +1366,12 @@ def on_disconnect():
     PLAYER_SIDS.pop(request.sid, None)
 
 
-@socketio.on("set_round")
-def on_set_round(data):
+def _set_round(new_round):
+    """Core round-change logic, shared by the direct round-strip click
+    (set_round) and the one-click 'Next Phase' round advance
+    (advance_round)."""
     old_round = GAME["round"]
-    new_round = max(1, min(NUM_ROUNDS, int(data["round"])))
+    new_round = max(1, min(NUM_ROUNDS, int(new_round)))
     if new_round != old_round:
         # Archive whatever happened in the round we're leaving, then start
         # a fresh events bucket for the round we're entering.
@@ -1393,6 +1396,24 @@ def on_set_round(data):
                 superman_st["shield"] = min(MAX_HEALTH, superman_st["shield"])
 
     broadcast()
+
+
+@socketio.on("set_round")
+def on_set_round(data):
+    _set_round(data["round"])
+
+
+@socketio.on("advance_round")
+def on_advance_round():
+    """'Next Phase' button on the host console, to the left of Inspect on
+    the phase strip - ends the current round and jumps straight into the
+    next round's Secret Identity phase in one click. No-ops once round 7
+    (the last round) is already underway; the button is also grayed out
+    client-side at that point, this is just the server-side backstop."""
+    if GAME["round"] >= NUM_ROUNDS:
+        return
+    _set_round(GAME["round"] + 1)
+    _set_phase_by_index(PHASES.index("Secret Identity"))
 
 
 def _set_phase_by_index(idx, error_sid=None):
@@ -2602,6 +2623,9 @@ def on_cast_vote(data):
             return  # only White Martians (or Alchemy-made Eliminators) vote during Eliminate!
         candidates = eliminate_candidates()
     elif phase == "Vote":
+        voter_cid = find_player_character_id(voter)
+        if voter_cid and current_arrest_scope(voter_cid) == "phases":
+            return  # under Citizen's Arrest / Stomped! - may NOT Vote this round
         candidates = vote_candidates()
     else:
         return  # voting isn't open outside Vote!/Eliminate!
@@ -3248,11 +3272,17 @@ def _invite_protector(cid):
     pname = (st.get("player_name") or "").strip()
     sid = _sid_for_player(pname) if pname else None
     if sid:
-        candidates = active_player_names(exclude_name=None if can_self_protect(cid) else pname)
-        socketio.emit("protect_prompt", {
-            "candidates": candidates,
-            "can_self_protect": can_self_protect(cid),
-        }, room=sid)
+        if cid == "plastic_man":
+            # Group Hug isn't a named-target pick - it's Left-side/Right-
+            # side, silently shielding the two nearest seated players in
+            # that direction (see submit_plastic_man_choice).
+            socketio.emit("plastic_man_prompt", {}, room=sid)
+        else:
+            candidates = active_player_names(exclude_name=None if can_self_protect(cid) else pname)
+            socketio.emit("protect_prompt", {
+                "candidates": candidates,
+                "can_self_protect": can_self_protect(cid),
+            }, room=sid)
     return True
 
 
@@ -3373,6 +3403,44 @@ def on_submit_protect_target(data):
     if protector_cid not in GAME["protect_responded_cids"]:
         GAME["protect_responded_cids"].append(protector_cid)
     apply_shield(target_cid, protector_cid)
+    broadcast()
+
+
+@socketio.on("submit_plastic_man_choice")
+def on_submit_plastic_man_choice(data):
+    """Plastic Man's player privately picks Left-side or Right-side for
+    Group Hug. Per his card, this silently shields the two players seated
+    nearest him in that direction (per the live seating chart) - they're
+    never told, unlike every other protector's target. Uses the same
+    tier-queue bookkeeping (active/responded) as submit_protect_target so
+    the host wizard advances normally afterward."""
+    pm_name = (data.get("plastic_man") or "").strip()
+    direction = data.get("direction")
+    if not pm_name or direction not in ("left", "right"):
+        return
+    pm_cid = find_player_character_id(pm_name)
+    if not pm_cid or pm_cid != "plastic_man" or pm_cid not in GAME["active_protector_cids"]:
+        return  # Plastic Man isn't currently invited to protect
+
+    target_names = seats_in_direction(pm_name, direction, count=2)
+    shielded = []
+    for target_name in target_names:
+        target_cid = find_player_character_id(target_name)
+        if target_cid and GAME["characters"].get(target_cid, {}).get("active"):
+            if apply_shield(target_cid, pm_cid, notify=False):
+                shielded.append(target_name)
+
+    GAME["active_protector_cids"].remove(pm_cid)
+    if pm_cid not in GAME["protect_responded_cids"]:
+        GAME["protect_responded_cids"].append(pm_cid)
+
+    side = f"{direction}-side"
+    if shielded:
+        log_activity(f"Plastic Man used Group Hug ({side}) - silently shielded "
+                     f"{' and '.join(shielded)}")
+    else:
+        log_activity(f"Plastic Man used Group Hug ({side}) - not enough seated "
+                     f"players in that direction to shield anyone")
     broadcast()
 
 

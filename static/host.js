@@ -294,6 +294,19 @@ for (let i = 1; i <= NUM_ROUNDS; i++) {
 
 const phaseStrip = document.getElementById("phase-strip");
 PHASES.forEach((p, idx) => {
+  if (p === "Inspect") {
+    const nextBtn = document.createElement("button");
+    nextBtn.id = "next-phase-btn";
+    nextBtn.className = "next-phase-btn";
+    nextBtn.type = "button";
+    nextBtn.textContent = "Next Phase ▶";
+    nextBtn.title = "End this round and jump straight into the next round's Secret Identity phase";
+    nextBtn.onclick = () => {
+      if (latestState && latestState.round >= NUM_ROUNDS) return;
+      socket.emit("advance_round");
+    };
+    phaseStrip.appendChild(nextBtn);
+  }
   const el = document.createElement("div");
   el.className = "led led-phase";
   el.textContent = p;
@@ -634,6 +647,14 @@ socket.on("state", (state) => {
   document.querySelectorAll("#phase-strip .led").forEach(el => {
     el.classList.toggle("on", Number(el.dataset.phase) === state.phase_index);
   });
+  const nextPhaseBtn = document.getElementById("next-phase-btn");
+  if (nextPhaseBtn) {
+    const atLastRound = state.round >= NUM_ROUNDS;
+    nextPhaseBtn.disabled = atLastRound;
+    nextPhaseBtn.title = atLastRound
+      ? "Round 7 is the final round - start a new game to go further"
+      : `End Round ${state.round} and jump straight into Round ${state.round + 1}'s Secret Identity phase`;
+  }
 
   if (state.phase_index !== lastSeenPhaseIndex) {
     if (state.phase_index !== null && state.phase_script) {
@@ -1303,19 +1324,19 @@ function openTimer(startSeconds, label) {
   timerSeconds = startSeconds;
   timerBeeped = false;
   timerLabel = label || "Discuss!";
-  document.getElementById("timer-title").textContent = timerLabel;
+  document.getElementById("host-timer-label").textContent = timerLabel;
+  document.getElementById("host-persistent-timer").style.display = "flex";
   renderTimer();
-  showOverlay("timer-overlay");
   startTimerInterval();
 }
 
 function renderTimer() {
   const m = Math.floor(Math.max(timerSeconds, 0) / 60);
   const s = Math.max(timerSeconds, 0) % 60;
-  const display = document.getElementById("timer-display");
+  const display = document.getElementById("host-timer-display");
   display.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   display.classList.toggle("time-up", timerSeconds <= 0);
-  document.getElementById("timer-toggle-btn").textContent = timerRunning ? "Pause" : "Resume";
+  document.getElementById("host-timer-toggle-btn").textContent = timerRunning ? "Pause" : "Resume";
   socket.emit("sync_timer", { label: timerLabel, remaining: timerSeconds, running: timerRunning });
 }
 
@@ -1358,7 +1379,7 @@ function adjustTimer(deltaSeconds) {
 function closeTimer() {
   clearInterval(timerHandle);
   timerRunning = false;
-  hideOverlay("timer-overlay");
+  document.getElementById("host-persistent-timer").style.display = "none";
   socket.emit("sync_timer", { label: null, remaining: 0, running: false });
 }
 

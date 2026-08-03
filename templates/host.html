@@ -174,19 +174,14 @@
   </div>
 </div>
 
-<div id="timer-overlay" class="map-overlay">
-  <div class="timer-modal">
-    <div class="map-modal-head">
-      <h3 style="margin:0" id="timer-title">Discuss!</h3>
-      <button class="btn-ghost" style="width:auto;padding:6px 12px" onclick="closeTimer()">Close</button>
-    </div>
-    <div class="timer-display mono" id="timer-display">02:00</div>
-    <div class="timer-controls">
-      <button class="btn-ghost" id="timer-toggle-btn" onclick="toggleTimer()">Pause</button>
-      <button class="btn-ghost" onclick="resetTimer()">Reset</button>
-      <button class="btn-ghost" onclick="adjustTimer(60)">+1 min</button>
-    </div>
-  </div>
+<div id="host-persistent-timer" class="host-persistent-timer" style="display:none">
+  <span id="host-timer-label" class="host-timer-label">Discuss!</span>
+  <span id="host-timer-display" class="mono host-timer-display">02:00</span>
+  <button class="host-timer-btn" id="host-timer-toggle-btn" onclick="toggleTimer()" title="Pause/Resume">Pause</button>
+  <button class="host-timer-btn" onclick="adjustTimer(-10)" title="-10 seconds">−10s</button>
+  <button class="host-timer-btn" onclick="adjustTimer(60)" title="+1 minute">+1m</button>
+  <button class="host-timer-btn" onclick="resetTimer()" title="Reset to 2:00">Reset</button>
+  <button class="host-timer-btn host-timer-close" onclick="closeTimer()" title="Dismiss">&times;</button>
 </div>
 
 <div id="prompts-overlay" class="map-overlay" onclick="if(event.target===this) closePrompts()">
